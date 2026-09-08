@@ -53,6 +53,12 @@ tam sürümüdür. Projedeki tüm modüller eksiksiz olarak geliştirilmiştir:
 - **Foreign Key İndeksleri**: Tüm dış anahtarlar indekslenerek JOIN ve kaskat silme performansları optimize edilmiştir.
 - **Zarif Kapatma (Graceful Shutdown)**: `SIGINT` / `SIGTERM` sinyallerinde HTTP sunucusu ve veritabanı havuzu bağlantıları temiz şekilde kapatılır.
 
-## Sırada ne var
+## Testler
 
-Önerilen sıradaki adım: **Bakımlar ve Arızalar Modülü** (`maintenance_records`, `faults`) — artık malzemeler ve stok sistemi hazır olduğu için bakım ve arızalarda malzeme sarfiyatı doğrudan stoktan düşülebilecektir.
+Entegrasyon testlerini çalıştırmak için önce sunucuyu (`npm start`) başlatın, ardından ayrı bir terminalde testleri yürütün:
+
+```bash
+npm test
+```
+
+Projenin tam mimari şeması, tüm API uç noktaları listesi, PWA ve üretim ortamı dağıtım yönergeleri için lütfen kök dizindeki [README.md](../README.md) dosyasına başvurun.
