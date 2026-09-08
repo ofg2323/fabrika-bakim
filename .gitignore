@@ -1,0 +1,6 @@
+*.git
+fabrika-bakim.backup.html
+*.png
+*.ico
+node_modules
+.env
