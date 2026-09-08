@@ -163,6 +163,7 @@ app.use('/api/ext-maintenance', require('./modules/ext-maintenance/ext-maintenan
 
 app.use('/api/projects', require('./modules/projects/projects.routes'));
 app.use('/api/settings', require('./modules/settings/settings.routes'));
+app.use('/api/audit-logs', require('./modules/audit-logs/audit-logs.routes'));
 
 app.get('/api/health', (req, res) => res.json({ ok: true, timestamp: new Date().toISOString() }));
 

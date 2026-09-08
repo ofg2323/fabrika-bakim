@@ -55,6 +55,7 @@ Uygulama; modern bir **PWA (Progressive Web App)** arayüzü, **Node.js / Expres
 | **Tedarikçiler** | `/api/suppliers` | Depo / Yönetici | Firma rehberi, yetkili kişi, iletişim bilgileri, ödeme vadeleri. |
 | **Projeler** | `/api/projects` | Yönetici | Yatırım/revizyon projeleri (`P00001`), alt görevler, tedarikçi teklifleri, bütçe revizyonları, ilerleme günlükleri. |
 | **Baskı & Sistem Ayarları** | `/api/settings` | Yönetici | Fabrika adı, kurumsal logo yükleme, A4 form baskı görünüm ayarları. |
+| **Denetim İzi (Audit Logs)** | `/api/audit-logs` | Yönetici | Sistem genelindeki kritik veri değişiklikleri (kim, ne zaman, hangi IP, işlem, eski/yeni veri). |
 
 ---
 
@@ -327,9 +328,10 @@ Tüm korumalı uç noktalarda HTTP başlığı olarak `Authorization: Bearer <TO
 
 ### 2. Kullanıcılar (`/api/users`)
 - `GET /api/users`: Tüm kullanıcıları listeler.
-- `POST /api/users` *(Yönetici)*: Yeni kullanıcı oluşturur (`name`, `role`, `password`).
-- `PUT /api/users/:id`: Kullanıcı bilgisi veya şifresini günceller.
-- `DELETE /api/users/:id` *(Yönetici)*: Kullanıcıyı siler (kendi hesabını silemez).
+- `GET /api/users/assignable`: Görev ve iş emri atanabilir personeli (`Yönetici`, `Bakımcı`, `Teknisyen`) döner.
+- `POST /api/users` *(Yönetici)*: Yeni kullanıcı oluşturur (Yetkili roller: `Yönetici`, `Bakımcı`, `Teknisyen`, `Depo Sorumlusu`, `Operatör`).
+- `PUT /api/users/:id`: Kullanıcı bilgisi veya şifresini günceller (Yöneticinin kendi rolünü düşürmesi ve son yöneticinin silinmesi engellidir).
+- `DELETE /api/users/:id` *(Yönetici)*: Kullanıcıyı siler (kendi hesabını veya son yöneticiyi silemez).
 
 ### 3. Varlık Grupları (`/api/asset-groups`)
 - `GET /api/asset-groups`: Grupları ve bakım periyotlarını listeler.
@@ -353,8 +355,9 @@ Tüm korumalı uç noktalarda HTTP başlığı olarak `Authorization: Bearer <TO
 - `POST /api/materials`: Yeni malzeme kartı tanımlar.
 - `PUT /api/materials/:id`: Malzeme bilgilerini günceller.
 - `POST /api/materials/:id/adjust`: Hızlı stok düzeltmesi yapar ve hareket günlüğü oluşturur.
-- `GET /api/stock`: Stok giriş/çıkış hareketlerini listeler.
 - `GET /api/stock/summary`: Toplam malzeme sayısı, kritik stok adedi ve toplam envanter maliyetini döner.
+- `GET /api/stock/movements`: Stok giriş/çıkış hareketlerini sayfalı ve filtreli (`materialId`, `type`, `q`, `startDate`, `endDate`) listeler.
+- `POST /api/stock/movements`: Atomik stok hareketi kaydeder (Stok yetersizliğinde negatif bakiye engellenir ve `409 Conflict` döner).
 
 ### 6. İhtiyaç Listesi (`/api/needs-list`)
 - `GET /api/needs-list`: Talepleri listeler (`?includeAuto=true` kritik stokları da sanal talep olarak döner).
@@ -401,10 +404,19 @@ Tüm korumalı uç noktalarda HTTP başlığı olarak `Authorization: Bearer <TO
 - `PUT /api/settings`: Ayarları günceller.
 - `POST /api/settings/logo`: Kurumsal logo görseli yükler.
 
+### 13. Denetim İzi / Audit Logs (`/api/audit-logs`)
+- `GET /api/audit-logs` *(Yönetici)*: Sistem genelinde gerçekleşen tüm kritik işlemleri (kullanıcı oluşturma/silme, stok hareketleri, bakım & arıza açma/kapama vb.) zaman damgası, kullanıcı, IP adresi ve işlem detayıyla sayfalı olarak döner. Filtreler: `action`, `entity`, `userId`, `startDate`, `endDate`, `limit`, `offset`.
+
+> [!NOTE]
+> **Sayfalama & Başlık Standardı**: Tüm liste uç noktaları (`/api/maintenance`, `/api/faults`, `/api/stock/movements`, `/api/audit-logs` vb.) sayfalama sınırlarını zorunlu kılar (varsayılan: 50, maksimum: 200). İstemciye toplam kayıt adedi ve sayfalama verileri `X-Total-Count`, `X-Limit` ve `X-Offset` HTTP başlıklarıyla döner.
+
 ---
 
 ## 🔒 Güvenlik ve Performans Önlemleri
 
+- **Merkezi Denetim İzi (Audit Logging)**: Kullanıcı yönetimi, stok düzeltmeleri, bakım, arıza, varlık ve malzeme değişiklikleri veritabanı transaction güvenliği gözetilerek `audit_logs` tablosuna IP adresi ve işlem detayları ile kaydedilir.
+- **Rol Yetki Koruması (RBAC Enforcement)**: Yetkisiz rol atamaları (`SuperAdmin` vb. sahte roller) reddedilir. Yöneticinin kendi rolünü düşürerek yetkisiz kalması veya sistemdeki tek yöneticinin silinmesi engellenmiştir.
+- **Stok Bakiye Koruması**: Mevcut stok miktarını aşan çıkış hareketleri `409 Conflict` hatası ile reddedilir; negatif stok bakiyeleri engellenir.
 - **Helmet Güvenlik Başlıkları**: X-Content-Type-Options, Strict-Transport-Security ve özel Content-Security-Policy (CSP) direktifleri uygulanmıştır.
 - **Hız Sınırlama (Rate Limiting)**:
   - Genel API için 15 dakikada en fazla 300 istek (üretim modu).
@@ -413,6 +425,9 @@ Tüm korumalı uç noktalarda HTTP başlığı olarak `Authorization: Bearer <TO
   - Yalnızca geçerli resim (`image/jpeg`, `image/png`, `image/webp`) ve belgeler (`application/pdf`) kabul edilir. `.exe`, `.sh`, `.php` gibi çalıştırılabilir dosyalar reddedilir.
   - Path Traversal ataklarına karşı `path.basename` ve `path.resolve` koruması uygulanmıştır.
 - **SQL Injection Engelleme**: Tüm veritabanı sorguları parametrik (`$1`, `$2`...) `pg.Pool` mekanizması ile çalıştırılır.
+- **Güvenli Sorgu Üretimi (URLSearchParams)**: `api-client.js` katmanında tüm filtreleme ve sayfalama parametreleri `URLSearchParams` standardı ile serialize edilir; bozuk veya tehlikeli sorgu string'leri engellenir.
+- **Seçici / Modüler Arayüz Senkronizasyonu**: Arayüzde bir CRUD işlemi tamamlandığında tüm veritabanını (14 paralel istek) yeniden yüklemek yerine yalnızca ilgili modüle ait scoped reload fonksiyonu (`reloadMaterials`, `reloadMaintenance`, `reloadFaults` vb.) çalıştırılır.
+- **Dış Bağlantı ve URL Güvenliği**: Arayüzdeki tüm harici bağlantılar ve pencere açma işlemleri `rel="noopener noreferrer"` ve `safeUrl()` protokol filtresi (`http:`, `https:` harici şemaları engelleyen) ile korunur.
 - **Zarif Kapatma (Graceful Shutdown)**: `SIGTERM` ve `SIGINT` sinyalleri yakalanarak açık HTTP istekleri ve veritabanı havuzu bağlantıları veri kaybı olmadan temiz bir şekilde kapatılır.
 
 ---
@@ -422,18 +437,12 @@ Tüm korumalı uç noktalarda HTTP başlığı olarak `Authorization: Bearer <TO
 Backend, harici bir test kütüphanesine ihtiyaç duymadan Node.js yerleşik test koşucusu (`node:test`) ve `assert/strict` ile kapsamlı şekilde test edilmiştir.
 
 ### Testleri Çalıştırma:
-1. **1. Terminalde** sunucuyu başlatın:
-   ```bash
-   cd backend
-   npm start
-   ```
-2. **2. Terminalde** testleri çalıştırın:
-   ```bash
-   cd backend
-   npm test
-   ```
+```bash
+cd backend
+npm test
+```
 
-### Test Kapsamı (7 Test Paketi):
+### Test Kapsamı (8 Test Paketi):
 1. `01_auth_users.test.js`: Giriş, JWT imzalama, yetkisiz erişim kontrolü, kullanıcı CRUD işlemleri.
 2. `02_assets_groups.test.js`: Varlık grupları, makine kartları, dosya ekleri, yedek parça ilişkileri.
 3. `03_materials_stock_purchases.test.js`: Stok kartları, kritik stok tespiti, atomik satın alma ve stok hareketi.
@@ -441,6 +450,7 @@ Backend, harici bir test kütüphanesine ihtiyaç duymadan Node.js yerleşik tes
 5. `05_inspections_extmaint.test.js`: Çoklu varlık muayeneleri, dış bakım ve sertifika yönetimi.
 6. `06_projects_settings.test.js`: Proje görevleri, teklif yükleme, bütçe revizyonu ve sistem ayarları.
 7. `07_security_static.test.js`: PWA manifest/sw doğrulaması, Helmet başlıkları ve zararlı dosya yükleme engelleme testi.
+8. `08_p1_features.test.js`: Merkezi denetim izi (audit logging), sayfalama sınırları ve HTTP başlıkları, rol whitelist/self-demotion koruması, stok yetersizliği 409 yönetimi.
 
 ---
 

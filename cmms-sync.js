@@ -20,6 +20,11 @@
   const isUuid = function(id) {
     return typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
   };
+  window.safeUrl = function(u) {
+    if (!u) return '';
+    const s = String(u).trim();
+    return /^(https?:\/\/|\/|blob:)/i.test(s) ? s : '#';
+  };
 
   // Modern Toast Bildirim Sistemi
   window.toast = {
@@ -122,26 +127,7 @@
       targetDb.counters = targetDb.counters || { fault: 0, maint: 0, inspection: 0, extmaint: 0, project: 0 };
 
       // Sayaçları senkronize et
-      if (targetDb.faults.length) {
-        const fNums = targetDb.faults.map(f => parseInt((f.trackingNo || '').replace(/\D/g, ''), 10)).filter(n => !isNaN(n));
-        if (fNums.length) targetDb.counters.fault = Math.max(targetDb.counters.fault || 0, ...fNums);
-      }
-      if (targetDb.maintenanceRecords.length) {
-        const mNums = targetDb.maintenanceRecords.map(m => parseInt((m.trackingNo || '').replace(/\D/g, ''), 10)).filter(n => !isNaN(n));
-        if (mNums.length) targetDb.counters.maint = Math.max(targetDb.counters.maint || 0, ...mNums);
-      }
-      if (targetDb.inspectionRecords.length) {
-        const iNums = targetDb.inspectionRecords.map(i => parseInt((i.trackingNo || '').replace(/\D/g, ''), 10)).filter(n => !isNaN(n));
-        if (iNums.length) targetDb.counters.inspection = Math.max(targetDb.counters.inspection || 0, ...iNums);
-      }
-      if (targetDb.extMaintRecords.length) {
-        const eNums = targetDb.extMaintRecords.map(e => parseInt((e.trackingNo || '').replace(/\D/g, ''), 10)).filter(n => !isNaN(n));
-        if (eNums.length) targetDb.counters.extmaint = Math.max(targetDb.counters.extmaint || 0, ...eNums);
-      }
-      if (targetDb.projects.length) {
-        const pNums = targetDb.projects.map(p => parseInt((p.trackingNo || '').replace(/\D/g, ''), 10)).filter(n => !isNaN(n));
-        if (pNums.length) targetDb.counters.project = Math.max(targetDb.counters.project || 0, ...pNums);
-      }
+      syncCounters();
 
     } catch (err) {
       console.error('Veri yükleme hatası:', err);
@@ -151,6 +137,159 @@
         window.toast.error('Veriler sunucudan alınamadı: ' + err.message);
       }
     }
+  };
+
+  function syncCounters() {
+    const targetDb = window.db;
+    if (!targetDb) return;
+    targetDb.counters = targetDb.counters || { fault: 0, maint: 0, inspection: 0, extmaint: 0, project: 0 };
+    if (targetDb.faults && targetDb.faults.length) {
+      const fNums = targetDb.faults.map(f => parseInt((f.trackingNo || '').replace(/\D/g, ''), 10)).filter(n => !isNaN(n));
+      if (fNums.length) targetDb.counters.fault = Math.max(targetDb.counters.fault || 0, ...fNums);
+    }
+    if (targetDb.maintenanceRecords && targetDb.maintenanceRecords.length) {
+      const mNums = targetDb.maintenanceRecords.map(m => parseInt((m.trackingNo || '').replace(/\D/g, ''), 10)).filter(n => !isNaN(n));
+      if (mNums.length) targetDb.counters.maint = Math.max(targetDb.counters.maint || 0, ...mNums);
+    }
+    if (targetDb.inspectionRecords && targetDb.inspectionRecords.length) {
+      const iNums = targetDb.inspectionRecords.map(i => parseInt((i.trackingNo || '').replace(/\D/g, ''), 10)).filter(n => !isNaN(n));
+      if (iNums.length) targetDb.counters.inspection = Math.max(targetDb.counters.inspection || 0, ...iNums);
+    }
+    if (targetDb.extMaintRecords && targetDb.extMaintRecords.length) {
+      const eNums = targetDb.extMaintRecords.map(e => parseInt((e.trackingNo || '').replace(/\D/g, ''), 10)).filter(n => !isNaN(n));
+      if (eNums.length) targetDb.counters.extmaint = Math.max(targetDb.counters.extmaint || 0, ...eNums);
+    }
+    if (targetDb.projects && targetDb.projects.length) {
+      const pNums = targetDb.projects.map(p => parseInt((p.trackingNo || '').replace(/\D/g, ''), 10)).filter(n => !isNaN(n));
+      if (pNums.length) targetDb.counters.project = Math.max(targetDb.counters.project || 0, ...pNums);
+    }
+  }
+
+  window.reloadUsers = async function() {
+    try {
+      const users = await API.getUsers();
+      if (window.db) window.db.users = users || [];
+    } catch (e) { console.error('reloadUsers error:', e); }
+  };
+
+  window.reloadAssetGroups = async function() {
+    try {
+      const groups = await API.getAssetGroups();
+      if (window.db) window.db.assetGroups = (groups || []).filter(g => g && isUuid(g.id));
+    } catch (e) { console.error('reloadAssetGroups error:', e); }
+  };
+
+  window.reloadAssets = async function() {
+    try {
+      const [assets, groups] = await Promise.all([API.getAssets(), API.getAssetGroups()]);
+      if (window.db) {
+        window.db.assets = (assets || []).filter(a => a && isUuid(a.id));
+        window.db.assetGroups = (groups || []).filter(g => g && isUuid(g.id));
+      }
+    } catch (e) { console.error('reloadAssets error:', e); }
+  };
+
+  window.reloadSuppliers = async function() {
+    try {
+      const suppliers = await API.getSuppliers();
+      if (window.db) window.db.suppliers = (suppliers || []).filter(s => s && isUuid(s.id));
+    } catch (e) { console.error('reloadSuppliers error:', e); }
+  };
+
+  window.reloadMaterials = async function() {
+    try {
+      const [materials, movs] = await Promise.all([API.getMaterials(), API.getStockMovements()]);
+      if (window.db) {
+        window.db.materials = (materials || []).filter(m => m && isUuid(m.id));
+        window.db.stockMovements = movs || [];
+      }
+    } catch (e) { console.error('reloadMaterials error:', e); }
+  };
+
+  window.reloadNeeds = async function() {
+    try {
+      const res = await API.getNeedsList(true);
+      if (window.db) window.db.needsList = (res && res.needs) || [];
+    } catch (e) { console.error('reloadNeeds error:', e); }
+  };
+
+  window.reloadPurchases = async function() {
+    try {
+      const [purchases, materials, movs, needsRes] = await Promise.all([
+        API.getPurchases(),
+        API.getMaterials(),
+        API.getStockMovements(),
+        API.getNeedsList(true)
+      ]);
+      if (window.db) {
+        window.db.purchases = purchases || [];
+        window.db.materials = (materials || []).filter(m => m && isUuid(m.id));
+        window.db.stockMovements = movs || [];
+        window.db.needsList = (needsRes && needsRes.needs) || [];
+      }
+    } catch (e) { console.error('reloadPurchases error:', e); }
+  };
+
+  window.reloadMaintenance = async function() {
+    try {
+      const [maints, materials, movs] = await Promise.all([
+        API.getMaintenanceRecords(),
+        API.getMaterials(),
+        API.getStockMovements()
+      ]);
+      if (window.db) {
+        window.db.maintenanceRecords = maints || [];
+        window.db.materials = (materials || []).filter(m => m && isUuid(m.id));
+        window.db.stockMovements = movs || [];
+        syncCounters();
+      }
+    } catch (e) { console.error('reloadMaintenance error:', e); }
+  };
+
+  window.reloadFaults = async function() {
+    try {
+      const [faults, materials, movs] = await Promise.all([
+        API.getFaults(),
+        API.getMaterials(),
+        API.getStockMovements()
+      ]);
+      if (window.db) {
+        window.db.faults = faults || [];
+        window.db.materials = (materials || []).filter(m => m && isUuid(m.id));
+        window.db.stockMovements = movs || [];
+        syncCounters();
+      }
+    } catch (e) { console.error('reloadFaults error:', e); }
+  };
+
+  window.reloadInspections = async function() {
+    try {
+      const inspections = await API.getInspections();
+      if (window.db) {
+        window.db.inspectionRecords = inspections || [];
+        syncCounters();
+      }
+    } catch (e) { console.error('reloadInspections error:', e); }
+  };
+
+  window.reloadExtMaintenance = async function() {
+    try {
+      const extMaints = await API.getExtMaintenance();
+      if (window.db) {
+        window.db.extMaintRecords = extMaints || [];
+        syncCounters();
+      }
+    } catch (e) { console.error('reloadExtMaintenance error:', e); }
+  };
+
+  window.reloadProjects = async function() {
+    try {
+      const projects = await API.getProjects();
+      if (window.db) {
+        window.db.projects = projects || [];
+        syncCounters();
+      }
+    } catch (e) { console.error('reloadProjects error:', e); }
   };
 
   window.saveDB = async function() {
@@ -356,7 +495,7 @@
         await API.createAsset(payload);
       }
 
-      await loadDB();
+      await reloadAssets();
       closeModal();
       renderTab();
       window.toast.success(isExisting ? 'Varlık güncellendi.' : 'Yeni varlık başarıyla kaydedildi.');
@@ -373,7 +512,10 @@
         } else if (window.db && window.db.assets) {
           window.db.assets = window.db.assets.filter(a => a.id !== id);
         }
-        await loadDB();
+        await reloadAssets();
+        await reloadMaintenance();
+        await reloadFaults();
+        await reloadInspections();
         renderTab();
         window.toast.success('Varlık silindi.');
       } catch (err) {
@@ -390,7 +532,7 @@
     try {
       const validMaterialIds = (tempSpareParts || []).filter(isUuid);
       await API.saveAssetSpareParts(assetId, validMaterialIds);
-      await loadDB();
+      await reloadAssets();
       closeModal();
       renderTab();
       window.toast.success('Yedek parçalar güncellendi.');
@@ -432,7 +574,7 @@
       } else {
         await API.createAssetGroup(payload);
       }
-      await loadDB();
+      await reloadAssetGroups();
       closeModal();
       renderTab();
       window.toast.success(id ? 'Varlık grubu güncellendi.' : 'Yeni grup kaydedildi.');
@@ -451,7 +593,7 @@
     confirmDelete('Bu varlık grubunu silmek istediğinize emin misiniz?', async () => {
       try {
         await API.deleteAssetGroup(id);
-        await loadDB();
+        await reloadAssetGroups();
         renderTab();
         window.toast.success('Grup silindi.');
       } catch (err) {
@@ -483,7 +625,7 @@
       } else {
         await API.createMaterial(payload);
       }
-      await loadDB();
+      await reloadMaterials();
       closeModal();
       renderTab();
       window.toast.success(id ? 'Malzeme güncellendi.' : 'Yeni malzeme kaydedildi.');
@@ -496,7 +638,7 @@
     confirmDelete('Bu malzemeyi silmek istediğinize emin misiniz?', async () => {
       try {
         await API.deleteMaterial(id);
-        await loadDB();
+        await reloadMaterials();
         renderTab();
         window.toast.success('Malzeme silindi.');
       } catch (err) {
@@ -512,7 +654,7 @@
 
     try {
       await API.adjustMaterialStock(materialId, type, qty, reason);
-      await loadDB();
+      await reloadMaterials();
       closeModal();
       renderTab();
       window.toast.success('Stok düzeltmesi uygulandı.');
@@ -544,7 +686,7 @@
 
     try {
       await API.createNeed(payload);
-      await loadDB();
+      await reloadNeeds();
       closeModal();
       renderTab();
       window.toast.success('İhtiyaç listesine eklendi.');
@@ -556,7 +698,7 @@
   window.markNeedStatus = async function(id, newStatus) {
     try {
       await API.updateNeedStatus(id, newStatus);
-      await loadDB();
+      await reloadNeeds();
       renderTab();
       window.toast.success('İhtiyaç durumu güncellendi.');
     } catch (err) {
@@ -568,7 +710,7 @@
     confirmDelete('Bu ihtiyaç kaydını silmek istediğinize emin misiniz?', async () => {
       try {
         await API.deleteNeed(id);
-        await loadDB();
+        await reloadNeeds();
         renderTab();
         window.toast.success('İhtiyaç kaydı silindi.');
       } catch (err) {
@@ -600,7 +742,7 @@
       } else {
         await API.createSupplier(payload);
       }
-      await loadDB();
+      await reloadSuppliers();
       closeModal();
       renderTab();
       window.toast.success(id ? 'Tedarikçi güncellendi.' : 'Yeni tedarikçi eklendi.');
@@ -613,7 +755,7 @@
     confirmDelete('Bu tedarikçiyi silmek istediğinize emin misiniz? Geçmiş satın alma kayıtları etkilenmez.', async () => {
       try {
         await API.deleteSupplier(id);
-        await loadDB();
+        await reloadSuppliers();
         renderTab();
         window.toast.success('Tedarikçi silindi.');
       } catch (err) {
@@ -651,7 +793,8 @@
       } else {
         await API.createPurchase(payload);
       }
-      await loadDB();
+      await reloadPurchases();
+      await reloadNeeds();
       closeModal();
       renderTab();
       window.toast.success(editId ? 'Satın alma güncellendi.' : 'Satın alma işlendi ve stok artırıldı.');
@@ -664,7 +807,8 @@
     confirmDelete('Bu satın alma kaydını silmek istediğinize emin misiniz? (Eklenen stok geri düşülecektir)', async () => {
       try {
         await API.deletePurchase(id);
-        await loadDB();
+        await reloadPurchases();
+        await reloadNeeds();
         renderTab();
         window.toast.success('Satın alma kaydı silindi.');
       } catch (err) {
@@ -699,7 +843,7 @@
       } else {
         await API.createMaintenanceRecord(payload);
       }
-      await loadDB();
+      await reloadMaintenance();
       closeModal();
       renderTab();
       window.toast.success(recordId ? 'Bakım güncellendi.' : 'Bakım başarıyla tamamlandı ve kaydedildi.');
@@ -713,7 +857,7 @@
     confirmDelete('Bu bakım kaydını silmek istediğinize emin misiniz? (Kullanılan malzemeler stoka iade edilir)', async () => {
       try {
         await API.deleteMaintenanceRecord(id);
-        await loadDB();
+        await reloadMaintenance();
         renderTab();
         window.toast.success('Bakım kaydı silindi.');
       } catch (err) {
@@ -752,7 +896,7 @@
         }
       }
 
-      await loadDB();
+      await reloadFaults();
       closeModal();
       renderTab();
       window.toast.success('Arıza bildirimi oluşturuldu.');
@@ -805,7 +949,7 @@
         }
       }
 
-      await loadDB();
+      await reloadFaults();
       closeModal();
       renderTab();
       window.toast.success('Arıza detayları güncellendi.');
@@ -818,7 +962,7 @@
     confirmDelete('Bu arıza kaydını silmek istediğinize emin misiniz? (Kullanılan malzemeler stoka iade edilir)', async () => {
       try {
         await API.deleteFault(id);
-        await loadDB();
+        await reloadFaults();
         renderTab();
         window.toast.success('Arıza kaydı silindi.');
       } catch (err) {
@@ -878,7 +1022,7 @@
         }
       }
 
-      await loadDB();
+      await reloadInspections();
       closeModal();
       renderTab();
       window.toast.success(recordId ? 'Muayene güncellendi.' : 'Muayene kaydı oluşturuldu.');
@@ -891,7 +1035,7 @@
     confirmDelete('Bu muayene kaydını silmek istediğinize emin misiniz?', async () => {
       try {
         await API.deleteInspection(id);
-        await loadDB();
+        await reloadInspections();
         renderTab();
         window.toast.success('Muayene kaydı silindi.');
       } catch (err) {
@@ -951,7 +1095,7 @@
         }
       }
 
-      await loadDB();
+      await reloadExtMaintenance();
       closeModal();
       renderTab();
       window.toast.success(recordId ? 'Dış bakım güncellendi.' : 'Dış bakım kaydı oluşturuldu.');
@@ -964,7 +1108,7 @@
     confirmDelete('Bu dış bakım kaydını silmek istediğinize emin misiniz?', async () => {
       try {
         await API.deleteExtMaintenance(id);
-        await loadDB();
+        await reloadExtMaintenance();
         renderTab();
         window.toast.success('Dış bakım kaydı silindi.');
       } catch (err) {
@@ -1005,7 +1149,7 @@
       } else {
         await API.createProject(payload);
       }
-      await loadDB();
+      await reloadProjects();
       closeModal();
       renderTab();
       window.toast.success(id ? 'Proje güncellendi.' : 'Yeni proje oluşturuldu.');
@@ -1019,7 +1163,7 @@
     confirmDelete('Bu projeyi silmek istediğinize emin misiniz? (Satın alma kayıtları silinmez, bağlantısı kaldırılır)', async () => {
       try {
         await API.deleteProject(id);
-        await loadDB();
+        await reloadProjects();
         currentProjectId = null;
         renderTab();
         window.toast.success('Proje silindi.');
@@ -1056,7 +1200,7 @@
       } else {
         await API.createProjectTask(projectId, payload);
       }
-      await loadDB();
+      await reloadProjects();
       closeModal();
       renderTab();
       window.toast.success(taskId ? 'Görev güncellendi.' : 'Görev eklendi.');
@@ -1069,7 +1213,7 @@
     confirmDelete('Bu görevi silmek istediğinize emin misiniz?', async () => {
       try {
         await API.deleteProjectTask(projectId, taskId);
-        await loadDB();
+        await reloadProjects();
         renderTab();
         window.toast.success('Görev silindi.');
       } catch (err) {
@@ -1094,7 +1238,7 @@
       } else {
         await API.createProjectQuote(projectId, { amount, supplierId, supplierName, date, validUntil, note }, file);
       }
-      await loadDB();
+      await reloadProjects();
       closeModal();
       renderTab();
       window.toast.success(quoteId ? 'Teklif güncellendi.' : 'Teklif eklendi.');
@@ -1107,7 +1251,7 @@
     confirmDelete('Bu teklifi silmek istediğinize emin misiniz?', async () => {
       try {
         await API.deleteProjectQuote(projectId, quoteId);
-        await loadDB();
+        await reloadProjects();
         renderTab();
         window.toast.success('Teklif silindi.');
       } catch (err) {
@@ -1124,7 +1268,7 @@
 
     try {
       await API.addProjectProgressLog(projectId, { date, note });
-      await loadDB();
+      await reloadProjects();
       closeModal();
       renderTab();
       window.toast.success('İlerleme notu eklendi.');
@@ -1137,7 +1281,7 @@
     confirmDelete('Bu ilerleme notunu silmek istediğinize emin misiniz?', async () => {
       try {
         await API.deleteProjectProgressLog(projectId, logId);
-        await loadDB();
+        await reloadProjects();
         renderTab();
         window.toast.success('İlerleme notu silindi.');
       } catch (err) {
@@ -1167,7 +1311,7 @@
       } else {
         await API.createUser({ name, role: role_, password: pw });
       }
-      await loadDB();
+      await reloadUsers();
       closeModal();
       renderApp();
       window.toast.success(id ? 'Kullanıcı güncellendi.' : 'Yeni kullanıcı oluşturuldu.');
@@ -1180,7 +1324,7 @@
     confirmDelete('Bu kullanıcıyı silmek istediğinize emin misiniz?', async () => {
       try {
         await API.deleteUser(id);
-        await loadDB();
+        await reloadUsers();
         renderTab();
         window.toast.success('Kullanıcı silindi.');
       } catch (err) {
@@ -1218,8 +1362,8 @@
     };
 
     try {
-      await API.saveSettings(payload);
-      await loadDB();
+      const updated = await API.updateSettings(payload);
+      if (window.db) window.db.printTemplate = updated || payload;
       window.toast.success('Baskı ve sistem ayarları kaydedildi.');
     } catch (err) {
       window.toast.error('Ayarlar kaydedilemedi: ' + err.message);
@@ -1292,7 +1436,7 @@
         }
       }
 
-      await loadDB();
+      await reloadAssets();
       inputEl.value = '';
       if (typeof renderTab === 'function') renderTab();
       const el = document.getElementById('assetImportResult');
@@ -1354,7 +1498,7 @@
         }
       }
 
-      await loadDB();
+      await reloadMaterials();
       inputEl.value = '';
       if (typeof renderTab === 'function') renderTab();
       const el = document.getElementById('materialImportResult');

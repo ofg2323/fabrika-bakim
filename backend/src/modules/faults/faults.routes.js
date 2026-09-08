@@ -4,6 +4,8 @@ const { requireAuth, requireRole } = require('../../middleware/auth');
 const { upload, safeUnlink } = require('../../middleware/upload');
 const { getNextTrackingNo } = require('../../utils/counters');
 const { toCamelFault, isUuid } = require('../../utils/formatters');
+const { parsePagination, setPaginationHeaders } = require('../../utils/pagination');
+const { logAudit, getClientIp } = require('../../utils/audit');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -18,11 +20,13 @@ router.param('id', (req, res, next, id) => {
 
 // GET /api/faults — Arızalar listesi (filtreleme ve arama destekli)
 router.get('/', async (req, res) => {
-  const { filter, status, priority, assetId, assignedTo, q, limit = 50, offset = 0 } = req.query;
+  const { filter, status, priority, assetId, assignedTo, q } = req.query;
+  const { limit, offset } = parsePagination(req.query, 50, 200);
 
   let query = `
     SELECT 
       f.*,
+      COUNT(*) OVER() AS full_count,
       a.name AS asset_name,
       a.asset_code,
       a.location,
@@ -76,9 +80,12 @@ router.get('/', async (req, res) => {
   }
 
   query += ` ORDER BY f.reported_date DESC, f.id DESC LIMIT $${paramIdx++} OFFSET $${paramIdx++}`;
-  params.push(parseInt(limit, 10) || 50, parseInt(offset, 10) || 0);
+  params.push(limit, offset);
 
   const { rows } = await pool.query(query, params);
+  const totalCount = rows[0]?.full_count ? parseInt(rows[0].full_count, 10) : 0;
+  setPaginationHeaders(res, totalCount, limit, offset);
+
   res.json(rows.map(toCamelFault));
 });
 
@@ -187,6 +194,16 @@ router.post('/', async (req, res) => {
     if (assetRows[0].status === 'Aktif') {
       await client.query("UPDATE assets SET status = 'Arızalı' WHERE id = $1", [assetId]);
     }
+
+    await logAudit(client, {
+      userId: req.user.id,
+      userName: req.user.name,
+      action: 'CREATE',
+      entityType: 'fault',
+      entityId: faultRows[0].id,
+      details: { trackingNo, assetId, title: title.trim(), priority },
+      ipAddress: getClientIp(req),
+    });
 
     await client.query('COMMIT');
     res.status(201).json(toCamelFault(faultRows[0]));
@@ -325,6 +342,16 @@ router.put('/:id', async (req, res) => {
       await client.query("UPDATE assets SET status = 'Arızalı' WHERE id = $1", [oldFault.asset_id]);
     }
 
+    await logAudit(client, {
+      userId: req.user.id,
+      userName: req.user.name,
+      action: 'UPDATE',
+      entityType: 'fault',
+      entityId: oldFault.id,
+      details: { trackingNo: oldFault.tracking_no, status: newStatus, priority },
+      ipAddress: getClientIp(req),
+    });
+
     await client.query('COMMIT');
     res.json(toCamelFault(updatedFaultRows[0]));
   } catch (err) {
@@ -381,11 +408,22 @@ router.delete('/:id', requireRole('Yönetici'), async (req, res) => {
     for (const u of usedMats) {
       await client.query('UPDATE materials SET qty = qty + $1 WHERE id = $2', [u.qty, u.material_id]);
     }
-    const { rows } = await client.query('DELETE FROM faults WHERE id = $1 RETURNING id', [req.params.id]);
+    const { rows } = await client.query('DELETE FROM faults WHERE id = $1 RETURNING id, tracking_no', [req.params.id]);
     if (!rows[0]) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Arıza kaydı bulunamadı.' });
     }
+
+    await logAudit(client, {
+      userId: req.user.id,
+      userName: req.user.name,
+      action: 'DELETE',
+      entityType: 'fault',
+      entityId: req.params.id,
+      details: { trackingNo: rows[0].tracking_no },
+      ipAddress: getClientIp(req),
+    });
+
     await client.query('COMMIT');
     res.status(204).end();
   } catch (err) {

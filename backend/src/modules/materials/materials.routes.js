@@ -2,6 +2,7 @@ const express = require('express');
 const pool = require('../../db/pool');
 const { requireAuth, requireRole } = require('../../middleware/auth');
 const { toCamelMaterial, toCamelStockMovement, isUuid } = require('../../utils/formatters');
+const { logAudit, getClientIp } = require('../../utils/audit');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -125,6 +126,15 @@ router.post('/', requireRole('Yönetici', 'Depo Sorumlusu'), async (req, res) =>
       );
     }
 
+    await logAudit(client, {
+      userId: req.user.id,
+      action: 'MATERIAL_CREATE',
+      entity: 'materials',
+      entityId: newMat.id,
+      details: { name: newMat.name, qty: initialQty, minQty: initialMinQty, unitCost: initialCost },
+      ipAddress: getClientIp(req),
+    });
+
     await client.query('COMMIT');
     res.status(201).json(toCamelMaterial(newMat));
   } catch (err) {
@@ -159,6 +169,16 @@ router.put('/:id', requireRole('Yönetici', 'Depo Sorumlusu'), async (req, res) 
   );
 
   if (!rows[0]) return res.status(404).json({ error: 'Malzeme bulunamadı.' });
+
+  await logAudit(pool, {
+    userId: req.user.id,
+    action: 'MATERIAL_UPDATE',
+    entity: 'materials',
+    entityId: req.params.id,
+    details: { name: rows[0].name, unit: rows[0].unit, minQty, unitCost },
+    ipAddress: getClientIp(req),
+  });
+
   res.json(toCamelMaterial(rows[0]));
 });
 
@@ -211,6 +231,15 @@ router.post('/:id/adjust', requireRole('Yönetici', 'Depo Sorumlusu'), async (re
       [req.params.id, type, adjustQty, req.user.id, reason ? reason.trim() : `Manuel ${type}`]
     );
 
+    await logAudit(client, {
+      userId: req.user.id,
+      action: 'MATERIAL_ADJUST',
+      entity: 'materials',
+      entityId: req.params.id,
+      details: { type, qty: adjustQty, reason, previousQty: matRows[0].qty, newQty: updatedRows[0].qty },
+      ipAddress: getClientIp(req),
+    });
+
     await client.query('COMMIT');
     res.json(toCamelMaterial(updatedRows[0]));
   } catch (err) {
@@ -223,8 +252,18 @@ router.post('/:id/adjust', requireRole('Yönetici', 'Depo Sorumlusu'), async (re
 
 // DELETE /api/materials/:id — Malzeme sil (Yalnızca Yönetici)
 router.delete('/:id', requireRole('Yönetici'), async (req, res) => {
-  const { rows } = await pool.query('DELETE FROM materials WHERE id=$1 RETURNING id', [req.params.id]);
+  const { rows } = await pool.query('DELETE FROM materials WHERE id=$1 RETURNING id, name', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'Malzeme bulunamadı.' });
+
+  await logAudit(pool, {
+    userId: req.user.id,
+    action: 'MATERIAL_DELETE',
+    entity: 'materials',
+    entityId: req.params.id,
+    details: { name: rows[0].name },
+    ipAddress: getClientIp(req),
+  });
+
   res.status(204).end();
 });
 

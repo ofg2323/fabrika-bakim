@@ -325,6 +325,22 @@ CREATE TABLE print_template (
 );
 INSERT INTO print_template (id) VALUES (1);
 
+-- ================= DENETİM GÜNLÜĞÜ (AUDIT LOGS) =================
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  user_name TEXT,
+  action TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT,
+  details JSONB DEFAULT '{}',
+  ip_address TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
+
 -- ================= DIŞ ANAHTAR (FOREIGN KEY) İNDEKSLERİ =================
 -- Silme/güncelleme kaskatları ve birleştirme (JOIN) performansı için
 CREATE INDEX IF NOT EXISTS idx_materials_supplier ON materials(default_supplier_id);

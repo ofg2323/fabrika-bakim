@@ -60,6 +60,25 @@
       }
     },
 
+    buildUrl(path, params) {
+      if (!params) return path;
+      if (typeof params === 'string') {
+        const trimmed = params.replace(/^\?/, '');
+        return trimmed ? `${path}?${trimmed}` : path;
+      }
+      if (typeof params === 'object') {
+        const searchParams = new URLSearchParams();
+        for (const [key, value] of Object.entries(params)) {
+          if (value !== undefined && value !== null && value !== '') {
+            searchParams.append(key, value);
+          }
+        }
+        const qs = searchParams.toString();
+        return qs ? `${path}?${qs}` : path;
+      }
+      return path;
+    },
+
     async request(path, options = {}, isRetry = false) {
       const url = `${API_BASE}${path.startsWith('/') ? path : '/' + path}`;
       const headers = options.headers || {};
@@ -137,6 +156,7 @@
 
     // Kullanıcılar
     getUsers() { return this.request('/users'); },
+    getAssignableUsers() { return this.request('/users/assignable'); },
     createUser(data) { return this.request('/users', { method: 'POST', body: data }); },
     updateUser(id, data) { return this.request(`/users/${id}`, { method: 'PUT', body: data }); },
     deleteUser(id) { return this.request(`/users/${id}`, { method: 'DELETE' }); },
@@ -148,7 +168,7 @@
     deleteAssetGroup(id) { return this.request(`/asset-groups/${id}`, { method: 'DELETE' }); },
 
     // Varlıklar
-    getAssets() { return this.request('/assets'); },
+    getAssets(params) { return this.request(this.buildUrl('/assets', params)); },
     getAsset(id) { return this.request(`/assets/${id}`); },
     createAsset(data) { return this.request('/assets', { method: 'POST', body: data }); },
     updateAsset(id, data) { return this.request(`/assets/${id}`, { method: 'PUT', body: data }); },
@@ -174,7 +194,7 @@
     deleteSupplier(id) { return this.request(`/suppliers/${id}`, { method: 'DELETE' }); },
 
     // Malzemeler
-    getMaterials() { return this.request('/materials'); },
+    getMaterials(params) { return this.request(this.buildUrl('/materials', params)); },
     createMaterial(data) { return this.request('/materials', { method: 'POST', body: data }); },
     updateMaterial(id, data) { return this.request(`/materials/${id}`, { method: 'PUT', body: data }); },
     deleteMaterial(id) { return this.request(`/materials/${id}`, { method: 'DELETE' }); },
@@ -183,30 +203,35 @@
     },
 
     // Stok
-    getStockMovements(query = '') { return this.request(`/stock/movements${query ? '?' + query : ''}`); },
+    getStockMovements(params) { return this.request(this.buildUrl('/stock/movements', params)); },
     getStockSummary() { return this.request('/stock/summary'); },
 
     // İhtiyaç Listesi
-    getNeedsList(includeAuto = true) { return this.request(`/needs-list?includeAuto=${includeAuto}`); },
+    getNeedsList(paramsOrIncludeAuto = true) {
+      if (typeof paramsOrIncludeAuto === 'boolean') {
+        return this.request(this.buildUrl('/needs-list', { includeAuto: paramsOrIncludeAuto }));
+      }
+      return this.request(this.buildUrl('/needs-list', paramsOrIncludeAuto));
+    },
     createNeed(data) { return this.request('/needs-list', { method: 'POST', body: data }); },
     updateNeed(id, data) { return this.request(`/needs-list/${id}`, { method: 'PUT', body: data }); },
     updateNeedStatus(id, status) { return this.request(`/needs-list/${id}/status`, { method: 'PATCH', body: { status } }); },
     deleteNeed(id) { return this.request(`/needs-list/${id}`, { method: 'DELETE' }); },
 
     // Satın Alma
-    getPurchases(query = '') { return this.request(`/purchases${query ? '?' + query : ''}`); },
+    getPurchases(params) { return this.request(this.buildUrl('/purchases', params)); },
     createPurchase(data) { return this.request('/purchases', { method: 'POST', body: data }); },
     updatePurchase(id, data) { return this.request(`/purchases/${id}`, { method: 'PUT', body: data }); },
     deletePurchase(id) { return this.request(`/purchases/${id}`, { method: 'DELETE' }); },
 
     // Bakımlar
-    getMaintenanceRecords(query = '') { return this.request(`/maintenance${query ? '?' + query : ''}`); },
+    getMaintenanceRecords(params) { return this.request(this.buildUrl('/maintenance', params)); },
     getMaintenanceRecord(id) { return this.request(`/maintenance/${id}`); },
     createMaintenanceRecord(data) { return this.request('/maintenance', { method: 'POST', body: data }); },
     deleteMaintenanceRecord(id) { return this.request(`/maintenance/${id}`, { method: 'DELETE' }); },
 
     // Arızalar
-    getFaults(query = '') { return this.request(`/faults${query ? '?' + query : ''}`); },
+    getFaults(params) { return this.request(this.buildUrl('/faults', params)); },
     getFault(id) { return this.request(`/faults/${id}`); },
     createFault(data) { return this.request('/faults', { method: 'POST', body: data }); },
     updateFault(id, data) { return this.request(`/faults/${id}`, { method: 'PUT', body: data }); },
@@ -223,7 +248,7 @@
     },
 
     // Muayeneler
-    getInspections(query = '') { return this.request(`/inspections${query ? '?' + query : ''}`); },
+    getInspections(params) { return this.request(this.buildUrl('/inspections', params)); },
     getInspection(id) { return this.request(`/inspections/${id}`); },
     createInspection(data) { return this.request('/inspections', { method: 'POST', body: data }); },
     updateInspection(id, data) { return this.request(`/inspections/${id}`, { method: 'PUT', body: data }); },
@@ -240,7 +265,7 @@
     },
 
     // Dış Bakım
-    getExtMaintenance(query = '') { return this.request(`/ext-maintenance${query ? '?' + query : ''}`); },
+    getExtMaintenance(params) { return this.request(this.buildUrl('/ext-maintenance', params)); },
     getExtMaintenanceDetail(id) { return this.request(`/ext-maintenance/${id}`); },
     createExtMaintenance(data) { return this.request('/ext-maintenance', { method: 'POST', body: data }); },
     updateExtMaintenance(id, data) { return this.request(`/ext-maintenance/${id}`, { method: 'PUT', body: data }); },
@@ -257,7 +282,7 @@
     },
 
     // Projeler
-    getProjects(query = '') { return this.request(`/projects${query ? '?' + query : ''}`); },
+    getProjects(params) { return this.request(this.buildUrl('/projects', params)); },
     getProject(id) { return this.request(`/projects/${id}`); },
     createProject(data) { return this.request('/projects', { method: 'POST', body: data }); },
     updateProject(id, data) { return this.request(`/projects/${id}`, { method: 'PUT', body: data }); },
@@ -285,9 +310,13 @@
       return this.request(`/projects/${projectId}/progress-logs/${logId}`, { method: 'DELETE' });
     },
 
+    // Denetim Günlüğü (Audit Logs)
+    getAuditLogs(params) { return this.request(this.buildUrl('/audit-logs', params)); },
+
     // Ayarlar & Logo
     getSettings() { return this.request('/settings'); },
     updateSettings(data) { return this.request('/settings', { method: 'PUT', body: data }); },
+    saveSettings(data) { return this.updateSettings(data); },
     uploadLogo(file) {
       const fd = new FormData();
       fd.append('logo', file, file.name || 'logo.png');

@@ -1264,11 +1264,11 @@ window.viewAttachment = async function(assetId, attId){
   const a = asset(assetId);
   const att = (a.attachments||[]).find(x=>x.id===attId);
   if(!att) return;
-  if(att.kind==='link'){ window.open(att.url, '_blank'); return; }
+  if(att.kind==='link'){ window.open(window.safeUrl ? window.safeUrl(att.url) : att.url, '_blank', 'noopener,noreferrer'); return; }
   try{
     const res = await window.storage.get(att.storageKey, true);
     if(!res){ alert('Dosya bulunamadı.'); return; }
-    const link = document.createElement('a'); link.href = res.value; link.download = att.name; link.target='_blank';
+    const link = document.createElement('a'); link.href = res.value; link.download = att.name; link.target='_blank'; link.rel = 'noopener noreferrer';
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   }catch(e){ alert('Dosya yüklenemedi.'); }
 };
@@ -1729,7 +1729,7 @@ function renderCertRows(){
     <div class="att-item">
       <span style="font-size:16px;">${c.kind==='image'?'🖼️':(c.kind==='link'?'🔗':'📄')}</span>
       <span style="flex:1; font-size:13px; font-weight:600;">${esc(c.name)}</span>
-      ${c.kind==='link'?`<button class="ghost small" onclick="window.open('${esc(c.url)}','_blank')">Aç</button>`
+      ${c.kind==='link'?`<button class="ghost small" onclick="window.open('${esc(window.safeUrl?window.safeUrl(c.url):c.url)}','_blank','noopener,noreferrer')">Aç</button>`
         : c.storageKey?`<button class="ghost small" onclick="viewCertificate('${c.storageKey}')">Görüntüle</button>`:`<span class="muted tiny">(kaydedilince yüklenecek)</span>`}
       <button class="icon" onclick="removeCertRow(${i})">×</button>
     </div>`).join('') : `<div class="muted tiny">Henüz sertifika eklenmedi.</div>`;
@@ -1765,7 +1765,7 @@ window.viewCertificate = async function(storageKey){
   try{
     const res = await window.storage.get(storageKey, true);
     if(!res){ alert('Dosya bulunamadı.'); return; }
-    const link = document.createElement('a'); link.href = res.value; link.target='_blank'; link.download='sertifika';
+    const link = document.createElement('a'); link.href = res.value; link.target='_blank'; link.rel='noopener noreferrer'; link.download='sertifika';
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   }catch(e){ alert('Dosya yüklenemedi.'); }
 };
@@ -2963,7 +2963,7 @@ function renderProjectQuotes(body, p){
         <td class="mono">${fmtStr(q.date)}</td>
         <td class="mono">${q.validUntil?fmtStr(q.validUntil):'—'}</td>
         <td><span class="badge ${stCls}"><span class="dot"></span>${esc(q.status)}</span></td>
-        <td>${q.fileStorageKey?`<button class="ghost small" onclick="viewCertificate('${q.fileStorageKey}')">Görüntüle</button>`:(q.fileUrl?`<button class="ghost small" onclick="window.open('${esc(q.fileUrl)}','_blank')">Aç</button>`:'—')}</td>
+        <td>${q.fileStorageKey?`<button class="ghost small" onclick="viewCertificate('${q.fileStorageKey}')">Görüntüle</button>`:(q.fileUrl?`<button class="ghost small" onclick="window.open('${esc(window.safeUrl?window.safeUrl(q.fileUrl):q.fileUrl)}','_blank','noopener,noreferrer')">Aç</button>`:'—')}</td>
         <td><button class="icon" onclick="openQuoteForm('${p.id}','${q.id}')">✎</button><button class="icon" onclick="deleteQuote('${p.id}','${q.id}')">×</button></td>
       </tr>`;
     }).join('') || `<tr><td colspan="7"><div class="empty">Henüz teklif eklenmedi.</div></td></tr>`}

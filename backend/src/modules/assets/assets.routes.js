@@ -3,6 +3,8 @@ const { upload, safeUnlink } = require('../../middleware/upload');
 const pool = require('../../db/pool');
 const { requireAuth, requireRole } = require('../../middleware/auth');
 const { isUuid, safeUuid } = require('../../utils/formatters');
+const { parsePagination, setPaginationHeaders } = require('../../utils/pagination');
+const { logAudit, getClientIp } = require('../../utils/audit');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -38,7 +40,13 @@ function toCamel(a) {
 
 // GET /api/assets
 router.get('/', async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM assets ORDER BY name');
+  const { limit, offset } = parsePagination(req.query, 1000, 1000);
+  const { rows } = await pool.query(
+    `SELECT *, COUNT(*) OVER() AS full_count FROM assets ORDER BY name LIMIT $1 OFFSET $2`,
+    [limit, offset]
+  );
+  const totalCount = rows.length > 0 ? parseInt(rows[0].full_count, 10) : 0;
+  setPaginationHeaders(res, totalCount, limit, offset);
   res.json(rows.map(toCamel));
 });
 
@@ -65,6 +73,16 @@ router.post('/', requireRole('Yönetici'), async (req, res) => {
       [b.name, b.assetCode || null, b.serial, b.brand, b.model, b.capacity, b.description,
        safeUuid(b.groupId), safeUuid(b.parentId), b.location, b.status || 'Aktif', b.lastMaintenanceDate || null]
     );
+
+    await logAudit(pool, {
+      userId: req.user.id,
+      action: 'ASSET_CREATE',
+      entity: 'assets',
+      entityId: rows[0].id,
+      details: { name: rows[0].name, assetCode: rows[0].asset_code },
+      ipAddress: getClientIp(req),
+    });
+
     res.status(201).json(toCamel(rows[0]));
   } catch (e) {
     if (e.code === '23505') return res.status(400).json({ error: 'Bu varlık kodu zaten kullanılıyor.' });
@@ -83,6 +101,16 @@ router.put('/:id', requireRole('Yönetici'), async (req, res) => {
        safeUuid(b.groupId), safeUuid(b.parentId), b.location, b.status, b.lastMaintenanceDate || null, req.params.id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Varlık bulunamadı.' });
+
+    await logAudit(pool, {
+      userId: req.user.id,
+      action: 'ASSET_UPDATE',
+      entity: 'assets',
+      entityId: req.params.id,
+      details: { name: rows[0].name, status: rows[0].status },
+      ipAddress: getClientIp(req),
+    });
+
     res.json(toCamel(rows[0]));
   } catch (e) {
     if (e.code === '23505') return res.status(400).json({ error: 'Bu varlık kodu zaten kullanılıyor.' });
@@ -91,8 +119,18 @@ router.put('/:id', requireRole('Yönetici'), async (req, res) => {
 });
 
 router.delete('/:id', requireRole('Yönetici'), async (req, res) => {
-  const { rowCount } = await pool.query('DELETE FROM assets WHERE id=$1', [req.params.id]);
-  if (!rowCount) return res.status(404).json({ error: 'Varlık bulunamadı.' });
+  const { rows } = await pool.query('DELETE FROM assets WHERE id=$1 RETURNING id, name', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: 'Varlık bulunamadı.' });
+
+  await logAudit(pool, {
+    userId: req.user.id,
+    action: 'ASSET_DELETE',
+    entity: 'assets',
+    entityId: req.params.id,
+    details: { name: rows[0].name },
+    ipAddress: getClientIp(req),
+  });
+
   res.status(204).end();
 });
 

@@ -4,6 +4,8 @@ const { requireAuth, requireRole } = require('../../middleware/auth');
 const { upload, safeUnlink } = require('../../middleware/upload');
 const { getNextTrackingNo } = require('../../utils/counters');
 const { toCamelProject, toCamelPurchase, isUuid } = require('../../utils/formatters');
+const { parsePagination, setPaginationHeaders } = require('../../utils/pagination');
+const { logAudit, getClientIp } = require('../../utils/audit');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -18,11 +20,13 @@ router.param('id', (req, res, next, id) => {
 
 // GET /api/projects — Proje listesi (harcanan bütçe ve görev sayılarıyla birlikte)
 router.get('/', async (req, res) => {
-  const { status, priority, ownerUserId, q, limit = 50, offset = 0 } = req.query;
+  const { status, priority, ownerUserId, q } = req.query;
+  const { limit, offset } = parsePagination(req.query, 50, 200);
 
   let query = `
     SELECT 
       p.*,
+      COUNT(*) OVER() AS full_count,
       u.name AS owner_user_name,
       COALESCE(spent.total, 0) AS spent_amount,
       COALESCE(tasks_info.cnt, 0) AS tasks_count,
@@ -70,9 +74,11 @@ router.get('/', async (req, res) => {
   }
 
   query += ` ORDER BY p.created_date DESC, p.id DESC LIMIT $${paramIdx++} OFFSET $${paramIdx++}`;
-  params.push(parseInt(limit, 10) || 50, parseInt(offset, 10) || 0);
+  params.push(limit, offset);
 
   const { rows } = await pool.query(query, params);
+  const totalCount = rows.length > 0 ? parseInt(rows[0].full_count, 10) : 0;
+  setPaginationHeaders(res, totalCount, limit, offset);
   res.json(rows.map(toCamelProject));
 });
 
@@ -234,6 +240,15 @@ router.post('/', requireRole('Yönetici'), async (req, res) => {
       );
     }
 
+    await logAudit(client, {
+      userId: req.user.id,
+      action: 'PROJECT_CREATE',
+      entity: 'projects',
+      entityId: project.id,
+      details: { trackingNo, name: project.name, initialBudget, priority: project.priority },
+      ipAddress: getClientIp(req),
+    });
+
     await client.query('COMMIT');
     res.status(201).json(toCamelProject(project));
   } catch (err) {
@@ -294,6 +309,16 @@ router.put('/:id', requireRole('Yönetici'), async (req, res) => {
   );
 
   if (!rows[0]) return res.status(404).json({ error: 'Proje bulunamadı.' });
+
+  await logAudit(pool, {
+    userId: req.user.id,
+    action: 'PROJECT_UPDATE',
+    entity: 'projects',
+    entityId: req.params.id,
+    details: { name: rows[0].name, status: rows[0].status, priority: rows[0].priority },
+    ipAddress: getClientIp(req),
+  });
+
   res.json(toCamelProject(rows[0]));
 });
 
@@ -485,11 +510,20 @@ router.delete('/:id', requireRole('Yönetici'), async (req, res) => {
     await client.query('UPDATE purchases SET project_id = NULL WHERE project_id = $1', [req.params.id]);
 
     // Projeyi sil (bağlı görevler, teklifler, bütçe geçmişi CASCADE ile silinir)
-    const { rows } = await client.query('DELETE FROM projects WHERE id = $1 RETURNING id', [req.params.id]);
+    const { rows } = await client.query('DELETE FROM projects WHERE id = $1 RETURNING id, name, tracking_no', [req.params.id]);
     if (!rows[0]) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Proje bulunamadı.' });
     }
+
+    await logAudit(client, {
+      userId: req.user.id,
+      action: 'PROJECT_DELETE',
+      entity: 'projects',
+      entityId: req.params.id,
+      details: { name: rows[0].name, trackingNo: rows[0].tracking_no },
+      ipAddress: getClientIp(req),
+    });
 
     await client.query('COMMIT');
     res.status(204).end();

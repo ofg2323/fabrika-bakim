@@ -2,6 +2,8 @@ const express = require('express');
 const pool = require('../../db/pool');
 const { requireAuth, requireRole } = require('../../middleware/auth');
 const { toCamelStockMovement } = require('../../utils/formatters');
+const { parsePagination, setPaginationHeaders } = require('../../utils/pagination');
+const { logAudit, getClientIp } = require('../../utils/audit');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -36,10 +38,15 @@ router.get('/summary', async (req, res) => {
 
 // GET /api/stock/movements — Stok hareketleri listesi (filtreleme ve arama destekli)
 router.get('/movements', async (req, res) => {
-  const { materialId, type, q, startDate, endDate, limit = 50, offset = 0 } = req.query;
+  const { materialId, type, q, startDate, endDate } = req.query;
+  const { limit, offset } = parsePagination(req.query, 50, 200);
 
   let query = `
-    SELECT sm.*, m.name AS material_name, m.unit AS material_unit, u.name AS user_name
+    SELECT sm.*, 
+      COUNT(*) OVER() AS full_count,
+      m.name AS material_name, 
+      m.unit AS material_unit, 
+      u.name AS user_name
     FROM stock_movements sm
     JOIN materials m ON m.id = sm.material_id
     LEFT JOIN users u ON u.id = sm.user_id
@@ -75,9 +82,11 @@ router.get('/movements', async (req, res) => {
   }
 
   query += ` ORDER BY sm.date DESC, sm.id DESC LIMIT $${paramIdx++} OFFSET $${paramIdx++}`;
-  params.push(parseInt(limit, 10) || 50, parseInt(offset, 10) || 0);
+  params.push(limit, offset);
 
   const { rows } = await pool.query(query, params);
+  const totalCount = rows.length > 0 ? parseInt(rows[0].full_count, 10) : 0;
+  setPaginationHeaders(res, totalCount, limit, offset);
   res.json(rows.map(toCamelStockMovement));
 });
 
@@ -100,7 +109,7 @@ router.post('/movements', requireRole('Yönetici', 'Depo Sorumlusu'), async (req
 
     // Malzemenin varlığını kontrol et ve kilitle
     const { rows: matRows } = await client.query(
-      'SELECT id, qty FROM materials WHERE id = $1 FOR UPDATE',
+      'SELECT id, name, qty FROM materials WHERE id = $1 FOR UPDATE',
       [materialId]
     );
 
@@ -109,10 +118,18 @@ router.post('/movements', requireRole('Yönetici', 'Depo Sorumlusu'), async (req
       return res.status(404).json({ error: 'Malzeme bulunamadı.' });
     }
 
+    const currentQty = parseFloat(matRows[0].qty) || 0;
+    if (type === 'Çıkış' && currentQty < movementQty) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: `Yetersiz stok! Mevcut stok (${currentQty}), çıkış yapılmak istenen miktardan (${movementQty}) az.`
+      });
+    }
+
     // Stok güncelle
     const updateSql = type === 'Giriş'
       ? 'UPDATE materials SET qty = qty + $1 WHERE id = $2'
-      : 'UPDATE materials SET qty = GREATEST(0, qty - $1) WHERE id = $2';
+      : 'UPDATE materials SET qty = qty - $1 WHERE id = $2';
 
     await client.query(updateSql, [movementQty, materialId]);
 
@@ -131,6 +148,15 @@ router.post('/movements', requireRole('Yönetici', 'Depo Sorumlusu'), async (req
         refPurchaseId || null,
       ]
     );
+
+    await logAudit(client, {
+      userId: req.user.id,
+      action: 'STOCK_MOVEMENT',
+      entity: 'stock_movements',
+      entityId: newMovements[0].id,
+      details: { materialId, type, qty: movementQty, reason },
+      ipAddress: getClientIp(req),
+    });
 
     await client.query('COMMIT');
     res.status(201).json(toCamelStockMovement(newMovements[0]));

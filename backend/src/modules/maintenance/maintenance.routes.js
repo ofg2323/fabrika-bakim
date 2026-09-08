@@ -3,6 +3,8 @@ const pool = require('../../db/pool');
 const { requireAuth, requireRole } = require('../../middleware/auth');
 const { getNextTrackingNo } = require('../../utils/counters');
 const { toCamelMaintenance, isUuid } = require('../../utils/formatters');
+const { parsePagination, setPaginationHeaders } = require('../../utils/pagination');
+const { logAudit, getClientIp } = require('../../utils/audit');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -17,11 +19,13 @@ router.param('id', (req, res, next, id) => {
 
 // GET /api/maintenance — Bakım kayıtları listesi (arama ve filtreleme destekli)
 router.get('/', async (req, res) => {
-  const { assetId, groupId, type, startDate, endDate, q, limit = 50, offset = 0 } = req.query;
+  const { assetId, groupId, type, startDate, endDate, q } = req.query;
+  const { limit, offset } = parsePagination(req.query, 50, 200);
 
   let query = `
     SELECT 
       mr.*,
+      COUNT(*) OVER() AS full_count,
       a.name AS asset_name,
       a.asset_code,
       a.group_id,
@@ -74,9 +78,12 @@ router.get('/', async (req, res) => {
   }
 
   query += ` ORDER BY mr.end_date DESC, mr.id DESC LIMIT $${paramIdx++} OFFSET $${paramIdx++}`;
-  params.push(parseInt(limit, 10) || 50, parseInt(offset, 10) || 0);
+  params.push(limit, offset);
 
   const { rows } = await pool.query(query, params);
+  const totalCount = rows[0]?.full_count ? parseInt(rows[0].full_count, 10) : 0;
+  setPaginationHeaders(res, totalCount, limit, offset);
+
   res.json(rows.map(toCamelMaintenance));
 });
 
@@ -252,6 +259,16 @@ router.post('/', requireRole('Yönetici', 'Teknisyen'), async (req, res) => {
       [end, assetId]
     );
 
+    await logAudit(client, {
+      userId: req.user.id,
+      userName: req.user.name,
+      action: 'CREATE',
+      entityType: 'maintenance',
+      entityId: record.id,
+      details: { trackingNo: record.tracking_no, assetId, type: maintType },
+      ipAddress: getClientIp(req),
+    });
+
     await client.query('COMMIT');
     res.status(201).json(toCamelMaintenance(record));
   } catch (err) {
@@ -294,6 +311,16 @@ router.delete('/:id', requireRole('Yönetici'), async (req, res) => {
 
     // Bakım kaydını sil (ON DELETE CASCADE ile used_materials otomatik silinir)
     await client.query('DELETE FROM maintenance_records WHERE id = $1', [rec.id]);
+
+    await logAudit(client, {
+      userId: req.user.id,
+      userName: req.user.name,
+      action: 'DELETE',
+      entityType: 'maintenance',
+      entityId: rec.id,
+      details: { trackingNo: rec.tracking_no, assetId: rec.asset_id },
+      ipAddress: getClientIp(req),
+    });
 
     await client.query('COMMIT');
     res.status(204).end();

@@ -2,6 +2,8 @@ const express = require('express');
 const pool = require('../../db/pool');
 const { requireAuth, requireRole } = require('../../middleware/auth');
 const { toCamelPurchase, isUuid } = require('../../utils/formatters');
+const { parsePagination, setPaginationHeaders } = require('../../utils/pagination');
+const { logAudit, getClientIp } = require('../../utils/audit');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -16,10 +18,12 @@ router.param('id', (req, res, next, id) => {
 
 // GET /api/purchases — Satın alma kayıtları listesi
 router.get('/', async (req, res) => {
-  const { q, materialId, supplierId, projectId, startDate, endDate, limit = 50, offset = 0 } = req.query;
+  const { q, materialId, supplierId, projectId, startDate, endDate } = req.query;
+  const { limit, offset } = parsePagination(req.query, 50, 200);
 
   let query = `
     SELECT p.*, 
+      COUNT(*) OVER() AS full_count,
       m.name AS material_name, 
       m.unit AS material_unit,
       s.name AS supplier_name,
@@ -67,9 +71,11 @@ router.get('/', async (req, res) => {
   }
 
   query += ` ORDER BY p.date DESC, p.id DESC LIMIT $${paramIdx++} OFFSET $${paramIdx++}`;
-  params.push(parseInt(limit, 10) || 50, parseInt(offset, 10) || 0);
+  params.push(limit, offset);
 
   const { rows } = await pool.query(query, params);
+  const totalCount = rows.length > 0 ? parseInt(rows[0].full_count, 10) : 0;
+  setPaginationHeaders(res, totalCount, limit, offset);
   res.json(rows.map(toCamelPurchase));
 });
 
@@ -196,6 +202,15 @@ router.post('/', requireRole('Yönetici', 'Depo Sorumlusu'), async (req, res) =>
       );
     }
 
+    await logAudit(client, {
+      userId: req.user.id,
+      action: 'PURCHASE_CREATE',
+      entity: 'purchases',
+      entityId: purchase.id,
+      details: { materialId, qty: purchaseQty, unitPrice: price, totalPrice, supplierId, projectId },
+      ipAddress: getClientIp(req),
+    });
+
     await client.query('COMMIT');
     res.status(201).json(toCamelPurchase(purchase));
   } catch (err) {
@@ -262,6 +277,20 @@ router.delete('/:id', requireRole('Yönetici'), async (req, res) => {
 
     // Satın alma kaydını sil
     await client.query('DELETE FROM purchases WHERE id = $1', [purchase.id]);
+
+    await logAudit(client, {
+      userId: req.user.id,
+      action: 'PURCHASE_DELETE',
+      entity: 'purchases',
+      entityId: purchase.id,
+      details: {
+        materialId: purchase.material_id,
+        qty: purchaseQty,
+        totalPrice: purchase.total_price,
+        supplierId: purchase.supplier_id,
+      },
+      ipAddress: getClientIp(req),
+    });
 
     await client.query('COMMIT');
     res.status(204).end();
