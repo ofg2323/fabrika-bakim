@@ -184,4 +184,39 @@ describe('Modül 5, 6, 7 & 8: Tedarikçi, Malzeme, Stok ve Satın Alma Testleri'
     const matRes = await api(`/api/materials/${materialId}`, {}, adminToken);
     assert.strictEqual(matRes.data.qty, 8);
   });
+
+  test('Tüketilmiş satın alma kaydının silinmesi 409 ile engellenmeli (P0 Satın Alma Bütünlüğü)', async () => {
+    assert.ok(materialId);
+
+    // 1. Yeni bir 20 adetlik alım yap (mevcut 8 + 20 = 28)
+    const pRes = await api('/api/purchases', {
+      method: 'POST',
+      body: {
+        materialId,
+        qty: 20,
+        unitPrice: 100,
+        supplierId,
+      },
+    }, adminToken);
+    assert.strictEqual(pRes.status, 201);
+    const newPurchaseId = pRes.data.id;
+
+    // 2. Stoğun bir kısmını çık (örneğin 25 adet çık, geriye 3 kalsın)
+    await api(`/api/materials/${materialId}/adjust`, {
+      method: 'POST',
+      body: {
+        type: 'Çıkış',
+        qty: 25,
+        reason: 'Sarfiyat testi',
+      },
+    }, adminToken);
+
+    // 3. Mevcut stok 3 iken 20 adetlik satın almayı silmeyi dene -> 409 engeli beklenir
+    const delRes = await api(`/api/purchases/${newPurchaseId}`, {
+      method: 'DELETE',
+    }, adminToken);
+
+    assert.strictEqual(delRes.status, 409);
+    assert.ok(delRes.data.error.includes('silinemez'));
+  });
 });

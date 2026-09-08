@@ -28,7 +28,9 @@ function toCamelStockMovement(sm) {
     userId: sm.user_id,
     userName: sm.user_name || null,
     reason: sm.reason || '',
-    refPurchaseId: sm.ref_purchase_id,
+    refPurchaseId: sm.ref_purchase_id || null,
+    refMaintenanceId: sm.ref_maintenance_id || null,
+    refFaultId: sm.ref_fault_id || null,
   };
 }
 

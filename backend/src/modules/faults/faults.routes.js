@@ -245,28 +245,44 @@ router.put('/:id', async (req, res) => {
         await client.query('UPDATE materials SET qty = qty + $1 WHERE id = $2', [cm.qty, cm.material_id]);
       }
       await client.query('DELETE FROM fault_used_materials WHERE fault_id = $1', [oldFault.id]);
-      await client.query("DELETE FROM stock_movements WHERE reason LIKE $1", [`%${oldFault.tracking_no}%`]);
+      // Önceki stok hareketlerini doğrudan ref_fault_id referansı ile temizle
+      await client.query('DELETE FROM stock_movements WHERE ref_fault_id = $1', [oldFault.id]);
 
-      // Yeni listeyi kaydet ve stoktan düş
+      // Yeni listeyi doğrula, kilitle ve stoktan düş
       for (const nm of usedMaterials.filter(m => parseFloat(m.qty) > 0)) {
         const itemQty = parseFloat(nm.qty);
-        const { rows: matRows } = await client.query('SELECT unit_cost FROM materials WHERE id = $1 FOR UPDATE', [nm.materialId]);
-        if (matRows[0]) {
-          const uCost = nm.unitCost !== undefined ? parseFloat(nm.unitCost) : (parseFloat(matRows[0].unit_cost) || 0);
+        const { rows: matRows } = await client.query(
+          'SELECT id, name, unit_cost, qty FROM materials WHERE id = $1 FOR UPDATE',
+          [nm.materialId]
+        );
 
-          await client.query(
-            'INSERT INTO fault_used_materials (fault_id, material_id, qty, unit_cost) VALUES ($1, $2, $3, $4)',
-            [oldFault.id, nm.materialId, itemQty, uCost]
-          );
-
-          await client.query('UPDATE materials SET qty = GREATEST(0, qty - $1) WHERE id = $2', [itemQty, nm.materialId]);
-
-          await client.query(
-            `INSERT INTO stock_movements (material_id, type, qty, date, user_id, reason)
-             VALUES ($1, 'Çıkış', $2, CURRENT_DATE, $3, $4)`,
-            [nm.materialId, itemQty, req.user.id, `Arıza onarım sarfiyatı: ${oldFault.tracking_no}`]
-          );
+        if (!matRows[0]) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: `Malzeme bulunamadı (ID: ${nm.materialId}).` });
         }
+
+        const currentQty = parseFloat(matRows[0].qty) || 0;
+        if (currentQty < itemQty) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({
+            error: `Yetersiz stok: "${matRows[0].name}" için mevcut stok (${currentQty}), arızada kullanılan miktardan (${itemQty}) az.`
+          });
+        }
+
+        const uCost = nm.unitCost !== undefined ? parseFloat(nm.unitCost) : (parseFloat(matRows[0].unit_cost) || 0);
+
+        await client.query(
+          'INSERT INTO fault_used_materials (fault_id, material_id, qty, unit_cost) VALUES ($1, $2, $3, $4)',
+          [oldFault.id, nm.materialId, itemQty, uCost]
+        );
+
+        await client.query('UPDATE materials SET qty = qty - $1 WHERE id = $2', [itemQty, nm.materialId]);
+
+        await client.query(
+          `INSERT INTO stock_movements (material_id, type, qty, date, user_id, reason, ref_fault_id)
+           VALUES ($1, 'Çıkış', $2, CURRENT_DATE, $3, $4, $5)`,
+          [nm.materialId, itemQty, req.user.id, `Arıza onarım sarfiyatı: ${oldFault.tracking_no}`, oldFault.id]
+        );
       }
     }
 

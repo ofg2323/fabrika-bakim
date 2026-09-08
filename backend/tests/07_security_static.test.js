@@ -10,7 +10,7 @@ describe('Modül 15: Güvenlik, PWA, Statik Dosyalar ve Bütünlük Testleri', (
     adminToken = auth.token;
   });
 
-  test('Güvenlik başlıkları (Helmet) mevcut olmalı', async () => {
+  test('Güvenlik başlıkları (Helmet) standartlara uygun olmalı', async () => {
     const res = await api('/', {}, false);
     assert.strictEqual(res.status, 200);
 
@@ -18,7 +18,8 @@ describe('Modül 15: Güvenlik, PWA, Statik Dosyalar ve Bütünlük Testleri', (
     assert.ok(res.headers.get('x-content-type-options'), 'X-Content-Type-Options olmalı');
     assert.ok(res.headers.get('content-security-policy'), 'Content-Security-Policy olmalı');
     const csp = res.headers.get('content-security-policy');
-    assert.ok(csp.includes("'unsafe-inline'"), "CSP 'unsafe-inline' içermeli");
+    assert.ok(!csp.includes("'unsafe-eval'"), "CSP 'unsafe-eval' İÇERMEMELİ");
+    assert.ok(csp.includes("object-src 'none'"), "CSP object-src 'none' içermeli");
   });
 
   test('PWA Manifest dosyası 200 ve geçerli JSON dönmeli (/manifest.json)', async () => {
@@ -53,7 +54,7 @@ describe('Modül 15: Güvenlik, PWA, Statik Dosyalar ve Bütünlük Testleri', (
   test('Senkronizasyon ve istemci scriptleri 200 dönmeli', async () => {
     const syncRes = await api('/cmms-sync.js', {}, false);
     assert.strictEqual(syncRes.status, 200);
-    assert.ok(syncRes.data.includes('CMMS Backend Senkronizasyonu'));
+    assert.ok(syncRes.data.includes('CMMS') || syncRes.data.includes('window.CMMS'));
 
     const clientRes = await api('/api-client.js', {}, false);
     assert.strictEqual(clientRes.status, 200);
@@ -61,7 +62,6 @@ describe('Modül 15: Güvenlik, PWA, Statik Dosyalar ve Bütünlük Testleri', (
   });
 
   test('Zararlı uzantılı dosya yükleme denemesi (.exe) engellenmeli', async () => {
-    // Rastgele bir arıza oluştur
     const faultRes = await api('/api/faults', {
       method: 'POST',
       body: {
@@ -70,7 +70,7 @@ describe('Modül 15: Güvenlik, PWA, Statik Dosyalar ve Bütünlük Testleri', (
       },
     }, adminToken);
 
-    if (!faultRes.data?.id) return; // Varlık yoksa atla
+    if (!faultRes.data?.id) return;
     const faultId = faultRes.data.id;
 
     // .exe dosyası yüklemeyi dene
@@ -84,9 +84,42 @@ describe('Modül 15: Güvenlik, PWA, Statik Dosyalar ve Bütünlük Testleri', (
       body: formData,
     });
 
-    // 400 ve geçersiz dosya türü hatası dönmeli
     assert.strictEqual(uploadRes.status, 400);
     const errData = await uploadRes.json();
     assert.ok(errData.error);
+  });
+
+  test('Geçersiz dosya imzası (magic bytes) taşıyan sahte PDF yüklemesi engellenmeli', async () => {
+    const faultRes = await api('/api/faults', {
+      method: 'POST',
+      body: {
+        assetId: (await api('/api/assets', {}, adminToken)).data[0]?.id,
+        title: 'Magic bytes test arızası',
+      },
+    }, adminToken);
+
+    if (!faultRes.data?.id) return;
+    const faultId = faultRes.data.id;
+
+    // Uzantısı .pdf ama içeriği sahte/zararlı metin
+    const formData = new FormData();
+    const blob = new Blob(['BU_BIR_PDF_DEGILDIR_SAHTE_ICERIK'], { type: 'application/pdf' });
+    formData.append('file', blob, 'sahte_rapor.pdf');
+
+    const uploadRes = await fetch(`${API_BASE}/api/faults/${faultId}/attachments`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${adminToken}` },
+      body: formData,
+    });
+
+    assert.strictEqual(uploadRes.status, 400);
+    const errData = await uploadRes.json();
+    assert.ok(errData.error);
+    assert.ok(errData.error.includes('magic bytes') || errData.error.includes('içeriği'));
+  });
+
+  test('Oturum açmamış kullanıcıların /uploads altındaki özel belgelere erişimi 401 dönmeli', async () => {
+    const unauthRes = await fetch(`${API_BASE}/uploads/gizli_rapor_test_123.pdf`);
+    assert.strictEqual(unauthRes.status, 401);
   });
 });

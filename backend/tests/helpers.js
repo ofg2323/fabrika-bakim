@@ -4,8 +4,39 @@ const API_BASE = process.env.API_BASE || 'http://localhost:3001';
 
 let cachedToken = null;
 let cachedAdmin = null;
+let serverInstance = null;
+
+async function ensureServerRunning() {
+  try {
+    const res = await fetch(`${API_BASE}/api/health`);
+    if (res.ok) return;
+  } catch (e) {
+    if (!serverInstance) {
+      serverInstance = require('../src/server');
+      if (serverInstance.server && typeof serverInstance.server.unref === 'function') {
+        serverInstance.server.unref();
+      }
+      for (let i = 0; i < 20; i++) {
+        await new Promise(r => setTimeout(r, 200));
+        try {
+          const res = await fetch(`${API_BASE}/api/health`);
+          if (res.ok) break;
+        } catch (_) {}
+      }
+    }
+  }
+}
+
+// Testler tamamlandiginda havuz ve sunucunun duzgun kapanmasi
+process.on('beforeExit', async () => {
+  if (serverInstance && serverInstance.server) {
+    serverInstance.server.close();
+  }
+  try { await pool.end(); } catch (_) {}
+});
 
 async function getAdminToken() {
+  await ensureServerRunning();
   if (cachedToken) return { token: cachedToken, admin: cachedAdmin };
 
   // Kullanıcıları kontrol et
@@ -59,6 +90,7 @@ async function getAdminToken() {
 }
 
 async function api(path, options = {}, token = null) {
+  await ensureServerRunning();
   const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
   const headers = { ...(options.headers || {}) };
 

@@ -190,44 +190,58 @@ router.post('/', requireRole('Yönetici', 'Teknisyen'), async (req, res) => {
 
     const record = maintRows[0];
 
-    // Kullanılan malzemeleri kaydet ve stoktan düş
+    // Kullanılan malzemeleri doğrula, kilitle ve stoktan düş
     for (const item of materialsList) {
       const itemQty = parseFloat(item.qty);
-      // Malzemenin güncel birim maliyetini çek ve stoğu kilitle
+      if (itemQty <= 0) continue;
+
+      // Malzemenin güncel stoğunu kilitle (Row-level Locking)
       const { rows: matRows } = await client.query(
         'SELECT id, name, unit_cost, qty FROM materials WHERE id = $1 FOR UPDATE',
         [item.materialId]
       );
 
-      if (matRows[0]) {
-        const unitCost = item.unitCost !== undefined ? parseFloat(item.unitCost) : (parseFloat(matRows[0].unit_cost) || 0);
-
-        // Kullanılan malzeme kaydını ekle
-        await client.query(
-          `INSERT INTO maintenance_used_materials (record_id, material_id, qty, unit_cost)
-           VALUES ($1, $2, $3, $4)`,
-          [record.id, item.materialId, itemQty, unitCost]
-        );
-
-        // Stok miktarını azalt
-        await client.query(
-          'UPDATE materials SET qty = GREATEST(0, qty - $1) WHERE id = $2',
-          [itemQty, item.materialId]
-        );
-
-        // Stok hareketini logla
-        await client.query(
-          `INSERT INTO stock_movements (material_id, type, qty, date, user_id, reason)
-           VALUES ($1, 'Çıkış', $2, $3, $4, $5)`,
-          [
-            item.materialId,
-            itemQty,
-            end,
-            req.user.id,
-            `Bakım kullanımı: ${trackingNo} (${assetRows[0].name})`,
-          ]
-        );
+      if (!matRows[0]) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: `Malzeme bulunamadı (ID: ${item.materialId}).` });
       }
+
+      const currentQty = parseFloat(matRows[0].qty) || 0;
+      if (currentQty < itemQty) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: `Yetersiz stok: "${matRows[0].name}" için mevcut stok (${currentQty}), kullanılan miktardan (${itemQty}) az.`
+        });
+      }
+
+      const unitCost = item.unitCost !== undefined ? parseFloat(item.unitCost) : (parseFloat(matRows[0].unit_cost) || 0);
+
+      // Kullanılan malzeme kaydını ekle
+      await client.query(
+        `INSERT INTO maintenance_used_materials (record_id, material_id, qty, unit_cost)
+         VALUES ($1, $2, $3, $4)`,
+        [record.id, item.materialId, itemQty, unitCost]
+      );
+
+      // Stok miktarını düş
+      await client.query(
+        'UPDATE materials SET qty = qty - $1 WHERE id = $2',
+        [itemQty, item.materialId]
+      );
+
+      // Stok hareketini doğrudan ref_maintenance_id ile logla
+      await client.query(
+        `INSERT INTO stock_movements (material_id, type, qty, date, user_id, reason, ref_maintenance_id)
+         VALUES ($1, 'Çıkış', $2, $3, $4, $5, $6)`,
+        [
+          item.materialId,
+          itemQty,
+          end,
+          req.user.id,
+          `Bakım kullanımı: ${trackingNo} (${assetRows[0].name})`,
+          record.id,
+        ]
+      );
     }
 
     // Varlığın son bakım tarihini güncelle

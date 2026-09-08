@@ -1226,14 +1226,16 @@
     }
   };
 
-  // 17. Dosya ve Sertifika Görüntüleme Köprüsü
+  // 17. Dosya ve Sertifika Görüntüleme Köprüsü (Güvenli Token ve noopener Korumalı)
   window.viewCertificate = function(storageKey) {
     if (!storageKey) {
       window.toast.error('Görüntülenecek dosya anahtarı bulunamadı.');
       return;
     }
-    const fileUrl = `${API.UPLOADS_BASE}/${encodeURIComponent(storageKey)}`;
-    window.open(fileUrl, '_blank');
+    const token = API.getToken();
+    const query = token ? `?token=${encodeURIComponent(token)}` : '';
+    const fileUrl = `${API.UPLOADS_BASE}/${encodeURIComponent(storageKey)}${query}`;
+    window.open(fileUrl, '_blank', 'noopener,noreferrer');
   };
 
   // 18. CSV Toplu Yükleme Entegrasyonu (PostgreSQL Uyumlu)

@@ -155,4 +155,29 @@ describe('Modül 9 & 10: Bakım ve Arıza Yönetimi Testleri', () => {
     const matRes = await api(`/api/materials/${materialId}`, {}, adminToken);
     assert.strictEqual(matRes.data.qty, 50);
   });
+
+  test('Yetersiz stok durumunda bakım kaydı oluşturulması 409 ile engellenmeli (P0 Stok Bütünlüğü)', async () => {
+    assert.ok(assetId);
+    assert.ok(materialId);
+
+    // Mevcut stok 50, talep edilen 9999
+    const res = await api('/api/maintenance', {
+      method: 'POST',
+      body: {
+        assetId,
+        type: 'Periyodik',
+        startDate: '2026-09-01',
+        endDate: '2026-09-01',
+        notes: 'Aşırı malzeme talebi testi',
+        usedMaterials: [{ materialId, qty: 9999 }],
+      },
+    }, adminToken);
+
+    assert.strictEqual(res.status, 409);
+    assert.ok(res.data.error.includes('Yetersiz stok'));
+
+    // Stok bozulmadan 50 olarak kalmalı
+    const matRes = await api(`/api/materials/${materialId}`, {}, adminToken);
+    assert.strictEqual(matRes.data.qty, 50);
+  });
 });

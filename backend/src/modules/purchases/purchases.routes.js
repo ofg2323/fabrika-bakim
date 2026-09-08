@@ -207,6 +207,7 @@ router.post('/', requireRole('Yönetici', 'Depo Sorumlusu'), async (req, res) =>
 });
 
 // DELETE /api/purchases/:id — Satın alma kaydını sil ve stoğu geri al (Yalnızca Yönetici)
+// DELETE /api/purchases/:id — Satın alma kaydını iptal et/sil (Ters stok hareketi ve denetim izi ile)
 router.delete('/:id', requireRole('Yönetici'), async (req, res) => {
   const client = await pool.connect();
   try {
@@ -219,17 +220,47 @@ router.delete('/:id', requireRole('Yönetici'), async (req, res) => {
     }
 
     const purchase = rows[0];
+    const purchaseQty = parseFloat(purchase.qty);
 
-    // Stoğu geri düş
-    await client.query(
-      'UPDATE materials SET qty = GREATEST(0, qty - $1) WHERE id = $2',
-      [purchase.qty, purchase.material_id]
+    // Malzemenin güncel stoğunu kilitle
+    const { rows: matRows } = await client.query(
+      'SELECT id, name, qty FROM materials WHERE id = $1 FOR UPDATE',
+      [purchase.material_id]
     );
 
-    // Stok hareketini sil
-    await client.query('DELETE FROM stock_movements WHERE ref_purchase_id = $1', [purchase.id]);
+    if (!matRows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'İlişkili malzeme bulunamadı.' });
+    }
 
-    // Satın almayı sil
+    const currentQty = parseFloat(matRows[0].qty) || 0;
+    if (currentQty < purchaseQty) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: `Bu satın alma kaydı silinemez: Satın alınan ${purchaseQty} adet malzemenin bir kısmı bakım/arıza veya diğer işlemlerde kullanılmış. Mevcut stok (${currentQty}), satın alma miktarından az.`
+      });
+    }
+
+    // Stoğu güvenle düş
+    await client.query(
+      'UPDATE materials SET qty = qty - $1 WHERE id = $2',
+      [purchaseQty, purchase.material_id]
+    );
+
+    // Denetim geçmişini (audit trail) korumak için orijinal hareketi silmek yerine ters işlem (reversal) 'Çıkış' kaydet
+    await client.query(
+      `INSERT INTO stock_movements (material_id, type, qty, date, user_id, reason, ref_purchase_id)
+       VALUES ($1, 'Çıkış', $2, CURRENT_DATE, $3, $4, $5)`,
+      [
+        purchase.material_id,
+        purchaseQty,
+        req.user.id,
+        `Satın alma iptali / iadesi (${purchase.id})`,
+        purchase.id,
+      ]
+    );
+
+    // Satın alma kaydını sil
     await client.query('DELETE FROM purchases WHERE id = $1', [purchase.id]);
 
     await client.query('COMMIT');

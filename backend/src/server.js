@@ -33,12 +33,41 @@ app.use(helmet({
   },
 }));
 
-// CORS Yapılandırması
-const allowedOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()) : null;
-app.use(cors({
-  origin: allowedOrigins || true,
-  credentials: true,
-}));
+const { requireAuth } = require('./middleware/auth');
+
+// CORS Yapılandırması (Production-ready whitelist ve same-origin koruması)
+const rawCorsOrigin = process.env.CORS_ORIGIN;
+let corsOptions;
+
+if (rawCorsOrigin && rawCorsOrigin.trim() !== '*') {
+  const allowedSet = new Set(
+    rawCorsOrigin.split(',').map(s => s.trim().replace(/\/$/, '')).filter(Boolean)
+  );
+  corsOptions = {
+    origin(origin, callback) {
+      if (!origin || allowedSet.has(origin.replace(/\/$/, ''))) {
+        return callback(null, true);
+      }
+      return callback(new Error(`CORS engellendi: "${origin}" yetkili adres listesinde yok.`));
+    },
+    credentials: true,
+  };
+} else if (process.env.NODE_ENV === 'production' && !rawCorsOrigin) {
+  corsOptions = {
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+      return callback(new Error('CORS engellendi: Üretim ortamında CORS_ORIGIN tanımlanmalıdır.'));
+    },
+    credentials: true,
+  };
+} else {
+  corsOptions = {
+    origin: true,
+    credentials: true,
+  };
+}
+
+app.use(cors(corsOptions));
 
 // Girdi boyutu kısıtı (DoS koruması)
 app.use(express.json({ limit: '2mb' }));
@@ -65,9 +94,29 @@ const authLimiter = rateLimit({
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/first-admin', authLimiter);
 
-// Statik dosya sunumu: yüklenen görsel/sertifika/PDF'ler
+// Güvenli dosya erişimi: Yalnızca yetkili oturum veya kurumsal logo erişebilir
 const uploadDir = path.resolve(process.env.UPLOAD_DIR || './uploads');
-app.use('/uploads', express.static(uploadDir));
+app.get('/uploads/:filename', (req, res, next) => {
+  const safeFilename = path.basename(req.params.filename);
+
+  // Giriş ekranı ve arayüz kurumsal logosu herkese açık gösterilebilir
+  if (safeFilename.startsWith('logo-') || safeFilename.endsWith('.ico')) {
+    const filePath = path.join(uploadDir, safeFilename);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Dosya bulunamadı.' });
+    }
+    return res.sendFile(filePath);
+  }
+
+  // Özel belgeler (arıza fotoğrafları, sertifikalar, PDF raporları) için oturum doğrulaması
+  return requireAuth(req, res, () => {
+    const filePath = path.join(uploadDir, safeFilename);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Dosya bulunamadı.' });
+    }
+    res.sendFile(filePath);
+  });
+});
 
 // Frontend ve istemci varlıkları doğrudan sunulur
 const frontendDir = path.resolve(__dirname, '../../');
@@ -176,3 +225,5 @@ function handleShutdown(signal) {
 
 process.on('SIGTERM', () => handleShutdown('SIGTERM'));
 process.on('SIGINT', () => handleShutdown('SIGINT'));
+
+module.exports = { app, server };

@@ -109,4 +109,44 @@ describe('Modül 1 & 2: Auth ve Kullanıcı Yönetimi Testleri', () => {
     const listRes = await api('/api/users', {}, adminToken);
     assert.ok(!listRes.data.find(u => u.id === createdUserId));
   });
+
+  test('Giriş işleminde refresh token üretilmeli ve /auth/refresh ile access token yenilenebilmeli', async () => {
+    const auth = await getAdminToken();
+    const loginRes = await api('/api/auth/login', {
+      method: 'POST',
+      body: {
+        userId: auth.admin.id,
+        password: 'test-password-123',
+      },
+    });
+
+    assert.strictEqual(loginRes.status, 200);
+    assert.ok(loginRes.data.token, 'Access token dönmeli');
+    assert.ok(loginRes.data.refreshToken, 'Refresh token dönmeli');
+
+    // /api/auth/refresh uç noktasını test et
+    const refreshRes = await api('/api/auth/refresh', {
+      method: 'POST',
+      body: {
+        refreshToken: loginRes.data.refreshToken,
+      },
+    });
+
+    assert.strictEqual(refreshRes.status, 200);
+    assert.ok(refreshRes.data.token, 'Yeni access token dönmeli');
+    assert.ok(refreshRes.data.refreshToken, 'Yeni refresh token dönmeli');
+  });
+
+  test('Kullanıcı mevcutken /api/auth/first-admin çağrısı 400 ile engellenmeli (Race condition koruması)', async () => {
+    const res = await api('/api/auth/first-admin', {
+      method: 'POST',
+      body: {
+        name: 'Sahte Admin',
+        password: 'admin-password-999',
+      },
+    });
+
+    assert.strictEqual(res.status, 400);
+    assert.ok(res.data.error.includes('Zaten kullanıcı mevcut'));
+  });
 });

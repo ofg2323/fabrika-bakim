@@ -18,6 +18,13 @@
       if (token) localStorage.setItem('cmms_token', token);
       else localStorage.removeItem('cmms_token');
     },
+    getRefreshToken() {
+      return localStorage.getItem('cmms_refresh_token') || '';
+    },
+    setRefreshToken(token) {
+      if (token) localStorage.setItem('cmms_refresh_token', token);
+      else localStorage.removeItem('cmms_refresh_token');
+    },
     getCurrentUser() {
       try {
         return JSON.parse(localStorage.getItem('cmms_user') || 'null');
@@ -30,7 +37,30 @@
       else localStorage.removeItem('cmms_user');
     },
 
-    async request(path, options = {}) {
+    async refreshTokens() {
+      const refreshToken = this.getRefreshToken();
+      try {
+        const res = await fetch(`${API_BASE}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken: refreshToken || undefined }),
+          credentials: 'include',
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (data && data.token) {
+          this.setToken(data.token);
+          if (data.refreshToken) this.setRefreshToken(data.refreshToken);
+          if (data.user) this.setCurrentUser(data.user);
+          return data;
+        }
+        return null;
+      } catch (e) {
+        return null;
+      }
+    },
+
+    async request(path, options = {}, isRetry = false) {
       const url = `${API_BASE}${path.startsWith('/') ? path : '/' + path}`;
       const headers = options.headers || {};
       const token = this.getToken();
@@ -44,10 +74,17 @@
       }
 
       try {
-        const res = await fetch(url, { ...options, headers });
+        const res = await fetch(url, { ...options, headers, credentials: 'include' });
 
-        if (res.status === 401 && !path.includes('/auth/login') && !path.includes('/auth/users')) {
+        if (res.status === 401 && !path.includes('/auth/login') && !path.includes('/auth/refresh') && !path.includes('/auth/users')) {
+          if (!isRetry) {
+            const refreshed = await this.refreshTokens();
+            if (refreshed) {
+              return this.request(path, options, true);
+            }
+          }
           this.setToken(null);
+          this.setRefreshToken(null);
           this.setCurrentUser(null);
           if (window.onAuthExpired) window.onAuthExpired();
           throw new Error('Oturum süresi doldu. Lütfen tekrar giriş yapın.');
@@ -70,17 +107,31 @@
     },
 
     // Kimlik Doğrulama
-    login(userId, password) {
-      return this.request('/auth/login', { method: 'POST', body: { userId, password } });
+    async login(userId, password) {
+      const data = await this.request('/auth/login', { method: 'POST', body: { userId, password } });
+      if (data && data.token) {
+        this.setToken(data.token);
+        if (data.refreshToken) this.setRefreshToken(data.refreshToken);
+        if (data.user) this.setCurrentUser(data.user);
+      }
+      return data;
     },
-    createFirstAdmin(name, password) {
-      return this.request('/auth/first-admin', { method: 'POST', body: { name, password } });
+    async createFirstAdmin(name, password) {
+      const data = await this.request('/auth/first-admin', { method: 'POST', body: { name, password } });
+      if (data && data.token) {
+        this.setToken(data.token);
+        if (data.refreshToken) this.setRefreshToken(data.refreshToken);
+        if (data.user) this.setCurrentUser(data.user);
+      }
+      return data;
     },
     getAuthUsers() {
       return this.request('/auth/users');
     },
     logout() {
+      fetch(`${API_BASE}/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
       this.setToken(null);
+      this.setRefreshToken(null);
       this.setCurrentUser(null);
     },
 

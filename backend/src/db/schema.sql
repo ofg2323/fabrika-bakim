@@ -90,9 +90,9 @@ CREATE TABLE materials (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   unit TEXT NOT NULL DEFAULT 'adet',
-  qty NUMERIC(14,2) NOT NULL DEFAULT 0,
-  min_qty NUMERIC(14,2) NOT NULL DEFAULT 0,
-  unit_cost NUMERIC(14,2) NOT NULL DEFAULT 0,
+  qty NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (qty >= 0),
+  min_qty NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (min_qty >= 0),
+  unit_cost NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (unit_cost >= 0),
   default_supplier_id UUID REFERENCES suppliers(id) ON DELETE SET NULL
 );
 ALTER TABLE asset_spare_parts ADD CONSTRAINT fk_spare_material FOREIGN KEY (material_id) REFERENCES materials(id) ON DELETE CASCADE;
@@ -101,11 +101,13 @@ CREATE TABLE stock_movements (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   material_id UUID NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
   type TEXT NOT NULL CHECK (type IN ('Giriş','Çıkış')),
-  qty NUMERIC(14,2) NOT NULL,
+  qty NUMERIC(14,2) NOT NULL CHECK (qty > 0),
   date DATE NOT NULL DEFAULT CURRENT_DATE,
   user_id UUID REFERENCES users(id),
   reason TEXT,
-  ref_purchase_id UUID -- satın alma veya bakım/arıza kaydına referans (polymorphic, uygulama katmanında çözülür)
+  ref_purchase_id UUID REFERENCES purchases(id) ON DELETE SET NULL,
+  ref_maintenance_id UUID, -- maintenance_records oluştuktan sonra FK eklenebilir veya circular olmaması için serbest
+  ref_fault_id UUID
 );
 
 CREATE TABLE needs_list (
@@ -185,9 +187,9 @@ CREATE TABLE project_progress_logs (
 CREATE TABLE purchases (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   material_id UUID NOT NULL REFERENCES materials(id),
-  qty NUMERIC(14,2) NOT NULL,
-  unit_price NUMERIC(14,2) NOT NULL DEFAULT 0,
-  total_price NUMERIC(14,2) NOT NULL DEFAULT 0,
+  qty NUMERIC(14,2) NOT NULL CHECK (qty > 0),
+  unit_price NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (unit_price >= 0),
+  total_price NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (total_price >= 0),
   supplier_id UUID REFERENCES suppliers(id) ON DELETE SET NULL,
   supplier_text TEXT,
   project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
@@ -216,8 +218,8 @@ CREATE TABLE maintenance_used_materials (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   record_id UUID NOT NULL REFERENCES maintenance_records(id) ON DELETE CASCADE,
   material_id UUID NOT NULL REFERENCES materials(id),
-  qty NUMERIC(14,2) NOT NULL,
-  unit_cost NUMERIC(14,2) NOT NULL DEFAULT 0
+  qty NUMERIC(14,2) NOT NULL CHECK (qty > 0),
+  unit_cost NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (unit_cost >= 0)
 );
 
 -- ================= ARIZALAR =================
@@ -242,8 +244,8 @@ CREATE TABLE fault_used_materials (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   fault_id UUID NOT NULL REFERENCES faults(id) ON DELETE CASCADE,
   material_id UUID NOT NULL REFERENCES materials(id),
-  qty NUMERIC(14,2) NOT NULL,
-  unit_cost NUMERIC(14,2) NOT NULL DEFAULT 0
+  qty NUMERIC(14,2) NOT NULL CHECK (qty > 0),
+  unit_cost NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (unit_cost >= 0)
 );
 
 CREATE TABLE fault_attachments (
