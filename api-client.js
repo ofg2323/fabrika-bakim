@@ -1,6 +1,7 @@
 /**
  * Fabrika Bakım Yönetimi (CMMS) — API İstemci Kütüphanesi
  * REST API ile tam uyumlu, JWT oturum yönetimi ve hata yakalama destekli.
+ */
 (function(window) {
   // Sunucu üzerinden (localhost, cloudflared tüneli, alan adı vb.) açılmışsa göreceli '/api' ve '/uploads' kullanılır.
   // Yalnızca doğrudan yerel dosya (file://) veya harici bir frontend portundan (örn: Live Server 5500) açılmışsa localhost:3001 kullanılır.
