@@ -105,7 +105,7 @@ CREATE TABLE stock_movements (
   date DATE NOT NULL DEFAULT CURRENT_DATE,
   user_id UUID REFERENCES users(id),
   reason TEXT,
-  ref_purchase_id UUID REFERENCES purchases(id) ON DELETE SET NULL,
+  ref_purchase_id UUID, -- purchases tablosu oluşturulduktan sonra altta FK eklenir
   ref_maintenance_id UUID, -- maintenance_records oluştuktan sonra FK eklenebilir veya circular olmaması için serbest
   ref_fault_id UUID
 );
@@ -197,6 +197,7 @@ CREATE TABLE purchases (
   buyer_id UUID REFERENCES users(id),
   note TEXT
 );
+ALTER TABLE stock_movements ADD CONSTRAINT fk_stock_movement_purchase FOREIGN KEY (ref_purchase_id) REFERENCES purchases(id) ON DELETE SET NULL;
 
 -- ================= BAKIMLAR =================
 CREATE TABLE maintenance_records (
