@@ -1,11 +1,14 @@
 /**
  * Fabrika Bakım Yönetimi (CMMS) — API İstemci Kütüphanesi
  * REST API ile tam uyumlu, JWT oturum yönetimi ve hata yakalama destekli.
- */
 (function(window) {
-  // Port 3001 üzerinden açılmışsa göreceli '/api', değilse tam URL kullanılır
-  const API_BASE = window.CMMS_API_BASE || (window.location.port === '3001' ? '/api' : 'http://localhost:3001/api');
-  const UPLOADS_BASE = window.CMMS_UPLOADS_BASE || (window.location.port === '3001' ? '/uploads' : 'http://localhost:3001/uploads');
+  // Sunucu üzerinden (localhost, cloudflared tüneli, alan adı vb.) açılmışsa göreceli '/api' ve '/uploads' kullanılır.
+  // Yalnızca doğrudan yerel dosya (file://) veya harici bir frontend portundan (örn: Live Server 5500) açılmışsa localhost:3001 kullanılır.
+  const isDifferentDevHost = window.location.protocol === 'file:' || 
+    (window.location.hostname === 'localhost' && window.location.port && window.location.port !== '3001' && window.location.port !== '');
+
+  const API_BASE = window.CMMS_API_BASE || (isDifferentDevHost ? 'http://localhost:3001/api' : '/api');
+  const UPLOADS_BASE = window.CMMS_UPLOADS_BASE || (isDifferentDevHost ? 'http://localhost:3001/uploads' : '/uploads');
 
   const API = {
     API_BASE,
@@ -119,7 +122,7 @@
         return data;
       } catch (err) {
         if (err.message.includes('Failed to fetch') || err.name === 'TypeError') {
-          throw new Error('Backend sunucusuna bağlanılamadı. Lütfen sunucunun (http://localhost:3001) çalıştığından emin olun.');
+          throw new Error('Backend sunucusuna bağlanılamadı. Lütfen sunucunun çalıştığından ve internet bağlantınızdan emin olun.');
         }
         throw err;
       }
