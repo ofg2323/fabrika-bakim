@@ -4,3 +4,5 @@ fabrika-bakim.backup.html
 *.ico
 node_modules
 .env
+tools/
+*.exe
