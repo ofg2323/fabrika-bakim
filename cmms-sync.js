@@ -110,7 +110,11 @@
         };
       }
       const targetDb = window.db;
-      targetDb.users = users || [];
+      targetDb.users = (users || []).map(u => ({
+        ...u,
+        hasPassword: !!(u.hasPassword || u.has_password || u.passwordHash),
+        passwordHash: (u.hasPassword || u.has_password || u.passwordHash) ? true : undefined
+      }));
       targetDb.assetGroups = (assetGroups || []).filter(g => g && isUuid(g.id));
       targetDb.assets = (assets || []).filter(a => a && isUuid(a.id));
       targetDb.suppliers = (suppliers || []).filter(s => s && isUuid(s.id));
@@ -168,7 +172,13 @@
   window.reloadUsers = async function() {
     try {
       const users = await API.getUsers();
-      if (window.db) window.db.users = users || [];
+      if (window.db) {
+        window.db.users = (users || []).map(u => ({
+          ...u,
+          hasPassword: !!(u.hasPassword || u.has_password || u.passwordHash),
+          passwordHash: (u.hasPassword || u.has_password || u.passwordHash) ? true : undefined
+        }));
+      }
     } catch (e) { console.error('reloadUsers error:', e); }
   };
 

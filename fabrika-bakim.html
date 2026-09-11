@@ -2609,7 +2609,7 @@ function renderUsers(el){
     ${db.users.map(u=>`<tr>
       <td style="font-weight:700;">${esc(u.name)}</td>
       <td><span class="badge b-accent"><span class="dot"></span>${esc(u.role)}</span></td>
-      <td>${u.passwordHash?`<span class="badge b-ok"><span class="dot"></span>Belirlendi</span>`:`<span class="badge b-warn"><span class="dot"></span>Belirlenmedi</span>`}</td>
+      <td>${(u.hasPassword || u.has_password || u.passwordHash)?`<span class="badge b-ok"><span class="dot"></span>Belirlendi</span>`:`<span class="badge b-warn"><span class="dot"></span>Belirlenmedi</span>`}</td>
       <td><button class="icon" onclick="openUserForm('${u.id}')">✎</button>${u.id!==currentUser.id?`<button class="icon" onclick="deleteUser('${u.id}')">×</button>`:''}</td>
     </tr>`).join('')}
     </tbody></table></div>`;

@@ -15,6 +15,12 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'degistirin-lutfen-uzu
 
 const app = express();
 
+// Reverse proxy desteği (Cloudflare Tunnel, Nginx, Docker vb. arkasında gerçek IP tespiti ve rate-limit uyumluluğu)
+const trustProxySetting = process.env.TRUST_PROXY
+  ? (process.env.TRUST_PROXY === 'true' ? true : (!isNaN(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY))
+  : 1;
+app.set('trust proxy', trustProxySetting);
+
 // Güvenlik başlıkları (Helmet)
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
@@ -80,6 +86,7 @@ const apiLimiter = rateLimit({
   max: isDev ? 10000 : 300,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false, default: true },
   message: { error: 'Çok fazla istek gönderildi. Lütfen biraz sonra tekrar deneyin.' },
 });
 app.use('/api', apiLimiter);
@@ -89,6 +96,7 @@ const authLimiter = rateLimit({
   max: isDev ? 2000 : 20,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false, default: true },
   message: { error: 'Çok fazla giriş denemesi yapıldı. Lütfen 15 dakika sonra tekrar deneyin.' },
 });
 app.use('/api/auth/login', authLimiter);

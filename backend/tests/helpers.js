@@ -59,34 +59,14 @@ async function getAdminToken() {
     cachedAdmin = rows[0];
   }
 
-  // Login ol
-  const loginRes = await fetch(`${API_BASE}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId: adminId, password: 'admin-password-123' }),
-  });
-
-  if (loginRes.ok) {
-    const data = await loginRes.json();
-    cachedToken = data.token;
-    cachedAdmin = data.user;
-    return { token: cachedToken, admin: cachedAdmin };
-  } else {
-    // Şifre farklıysa test için geçici şifre güncelle
-    const bcrypt = require('bcryptjs');
-    const hash = await bcrypt.hash('test-password-123', 10);
-    await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, adminId]);
-
-    const retryRes = await fetch(`${API_BASE}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: adminId, password: 'test-password-123' }),
-    });
-    const data = await retryRes.json();
-    cachedToken = data.token;
-    cachedAdmin = data.user;
-    return { token: cachedToken, admin: cachedAdmin };
-  }
+  const jwt = require('jsonwebtoken');
+  const secret = process.env.JWT_SECRET;
+  cachedToken = jwt.sign(
+    { id: cachedAdmin.id, role: cachedAdmin.role, name: cachedAdmin.name },
+    secret,
+    { expiresIn: '8h' }
+  );
+  return { token: cachedToken, admin: cachedAdmin };
 }
 
 async function api(path, options = {}, token = null) {

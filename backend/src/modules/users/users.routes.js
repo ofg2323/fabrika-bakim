@@ -27,7 +27,7 @@ router.get('/assignable', async (req, res) => {
 router.get('/', async (req, res) => {
   const isAdmin = req.user && req.user.role === 'Yönetici';
   const query = isAdmin
-    ? 'SELECT id, name, role, (password_hash IS NOT NULL) AS has_password FROM users ORDER BY name'
+    ? 'SELECT id, name, role, (password_hash IS NOT NULL) AS has_password, (password_hash IS NOT NULL) AS "hasPassword" FROM users ORDER BY name'
     : 'SELECT id, name, role FROM users ORDER BY name';
   const { rows } = await pool.query(query);
   res.json(rows);
@@ -46,7 +46,7 @@ router.post('/', requireRole('Yönetici'), async (req, res) => {
 
   const hash = await bcrypt.hash(password, 10);
   const { rows } = await pool.query(
-    'INSERT INTO users (name, role, password_hash) VALUES ($1,$2,$3) RETURNING id, name, role',
+    'INSERT INTO users (name, role, password_hash) VALUES ($1,$2,$3) RETURNING id, name, role, (password_hash IS NOT NULL) AS has_password, (password_hash IS NOT NULL) AS "hasPassword"',
     [name.trim(), role, hash]
   );
   const newUser = rows[0];
@@ -115,7 +115,7 @@ router.put('/:id', async (req, res) => {
 
   values.push(id);
   const { rows } = await pool.query(
-    `UPDATE users SET ${fields.join(', ')} WHERE id=$${i} RETURNING id, name, role`,
+    `UPDATE users SET ${fields.join(', ')} WHERE id=$${i} RETURNING id, name, role, (password_hash IS NOT NULL) AS has_password, (password_hash IS NOT NULL) AS "hasPassword"`,
     values
   );
 
