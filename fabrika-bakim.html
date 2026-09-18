@@ -307,6 +307,7 @@ const MAINT_TYPES = ['Periyodik','Arıza Sonrası','Kestirimci','Genel/Diğer'];
 const DEFAULT_PRINT_TEMPLATE = {
   companyName:'Fabrika Adı',
   logoKey:null,
+  logoStorageKey:null,
   footerNote:'',
   pageSize:'A4',
   orientation:'portrait',
@@ -318,6 +319,7 @@ const DEFAULT_PRINT_TEMPLATE = {
     showNotes:true,
     showSignatures:true,
     signatureLabels:['Bakımı Yapan','Kontrol Eden'],
+    blockOrder:['header','assetInfo','typeAndDates','checklist','materials','costs','notes','signatures'],
   },
   fault:{
     showAssetInfo:true,
@@ -327,27 +329,41 @@ const DEFAULT_PRINT_TEMPLATE = {
     showNotes:true,
     showSignatures:true,
     signatureLabels:['Bildiren','Kontrol Eden'],
+    blockOrder:['header','assetInfo','priorityStatus','description','materials','costs','notes','signatures'],
   },
 };
 function migratePrintTemplate(t){
   if(!t) return JSON.parse(JSON.stringify(DEFAULT_PRINT_TEMPLATE));
-  if(t.maint && t.fault) return t;
+  const def = DEFAULT_PRINT_TEMPLATE;
+  const mt = t.maint || {};
+  const ft = t.fault || {};
   return {
-    companyName: t.companyName||'Fabrika Adı',
-    logoKey: t.logoKey||null,
-    footerNote: t.footerNote||'',
-    pageSize: t.pageSize||'A4',
-    orientation: t.orientation||'portrait',
+    companyName: t.companyName || def.companyName,
+    logoKey: t.logoKey || null,
+    logoStorageKey: t.logoStorageKey || null,
+    footerNote: t.footerNote || '',
+    pageSize: t.pageSize || 'A4',
+    orientation: t.orientation || 'portrait',
     maint:{
-      showAssetInfo: t.showAssetInfo!==undefined?t.showAssetInfo:true,
-      showTypeAndDates: t.showTypeAndDates!==undefined?t.showTypeAndDates:true,
-      showChecklist: t.showChecklist!==undefined?t.showChecklist:true,
-      showMaterials: t.showMaterials!==undefined?t.showMaterials:true,
-      showNotes: t.showNotes!==undefined?t.showNotes:true,
-      showSignatures: t.showSignatures!==undefined?t.showSignatures:true,
-      signatureLabels: t.signatureLabels||['Bakımı Yapan','Kontrol Eden'],
+      showAssetInfo: mt.showAssetInfo!==undefined ? mt.showAssetInfo : true,
+      showTypeAndDates: mt.showTypeAndDates!==undefined ? mt.showTypeAndDates : true,
+      showChecklist: mt.showChecklist!==undefined ? mt.showChecklist : true,
+      showMaterials: mt.showMaterials!==undefined ? mt.showMaterials : true,
+      showNotes: mt.showNotes!==undefined ? mt.showNotes : true,
+      showSignatures: mt.showSignatures!==undefined ? mt.showSignatures : true,
+      signatureLabels: (mt.signatureLabels && mt.signatureLabels.length) ? mt.signatureLabels : ['Bakımı Yapan','Kontrol Eden'],
+      blockOrder: (mt.blockOrder && mt.blockOrder.length) ? mt.blockOrder : ['header','assetInfo','typeAndDates','checklist','materials','costs','notes','signatures'],
     },
-    fault: JSON.parse(JSON.stringify(DEFAULT_PRINT_TEMPLATE.fault)),
+    fault:{
+      showAssetInfo: ft.showAssetInfo!==undefined ? ft.showAssetInfo : true,
+      showPriorityStatus: ft.showPriorityStatus!==undefined ? ft.showPriorityStatus : true,
+      showDescription: ft.showDescription!==undefined ? ft.showDescription : true,
+      showMaterials: ft.showMaterials!==undefined ? ft.showMaterials : true,
+      showNotes: ft.showNotes!==undefined ? ft.showNotes : true,
+      showSignatures: ft.showSignatures!==undefined ? ft.showSignatures : true,
+      signatureLabels: (ft.signatureLabels && ft.signatureLabels.length) ? ft.signatureLabels : ['Bildiren','Kontrol Eden'],
+      blockOrder: (ft.blockOrder && ft.blockOrder.length) ? ft.blockOrder : ['header','assetInfo','priorityStatus','description','materials','costs','notes','signatures'],
+    },
   };
 }
 const uid = p => (p||'id') + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
@@ -559,6 +575,7 @@ function role(){ return currentUser ? currentUser.role : null; }
 function can(perm){
   const r = role();
   if(r==='Yönetici') return true;
+  if(perm==='manageTemplates'||perm==='editTemplates') return false;
   if(perm==='editStock') return r==='Depo Sorumlusu';
   if(perm==='editAssets'||perm==='editGroups'||perm==='editUsers'||perm==='manageProjects') return false;
   if(perm==='doMaintenance'||perm==='manageFaults'||perm==='doInspection'||perm==='doExtMaint'||perm==='updateProjectProgress') return r==='Teknisyen';
@@ -718,60 +735,98 @@ function openPrintWindow(bodyHtml, pageCss){
 }
 async function fetchLogoDataUrl(){
   const t = db.printTemplate || DEFAULT_PRINT_TEMPLATE;
+  if(t.logoStorageKey){
+    const apiBase = (window.CMMS_API && window.CMMS_API.UPLOADS_BASE) ? window.CMMS_API.UPLOADS_BASE : '/uploads';
+    const token = (window.CMMS_API && window.CMMS_API.getToken) ? window.CMMS_API.getToken() : '';
+    return `${apiBase}/${encodeURIComponent(t.logoStorageKey)}${token ? '?token=' + encodeURIComponent(token) : ''}`;
+  }
   if(!t.logoKey) return '';
   try{ const res = await window.storage.get(t.logoKey, true); return res?res.value:''; }catch(e){ return ''; }
 }
+
+function getFaultBlockRenderers(){
+  return {
+    header: (c) => `<div class="print-header">
+      ${c.logoUrl?`<img class="print-logo" src="${c.logoUrl}">`:''}
+      <div class="print-company">${esc(c.t.companyName||'')}</div>
+      <div class="print-title">Arıza Formu${c.f.trackingNo?' — '+esc(c.f.trackingNo):''}</div>
+    </div>`,
+    assetInfo: (c) => c.ft.showAssetInfo ? `<table class="print-table">
+      <tr><th>Takip No</th><td>${esc(c.f.trackingNo||'')}</td><th>Varlık</th><td>${esc(c.a?c.a.name:'')}</td></tr>
+      <tr><th>Varlık Kodu</th><td>${esc((c.a&&c.a.assetCode)||'')}</td><th>Konum</th><td>${esc((c.a&&c.a.location)||'')}</td></tr>
+      <tr><th>Grup</th><td>${esc(c.g?c.g.name:'')}</td><th>Atanan</th><td>${esc(userName(c.f.assignedTo))}</td></tr>
+    </table>` : '',
+    priorityStatus: (c) => c.ft.showPriorityStatus ? `<table class="print-table">
+      <tr><th>Öncelik</th><td>${esc(c.f.priority)}</td><th>Durum</th><td>${esc(c.f.status)}</td></tr>
+      <tr><th>Bildirim Tarihi</th><td>${fmtStr(c.f.reportedDate)}</td><th>Kapanış Tarihi</th><td>${c.f.resolvedDate?fmtStr(c.f.resolvedDate):'—'}</td></tr>
+    </table>` : '',
+    description: (c) => c.ft.showDescription ? `<div class="print-section-title">Başlık / Açıklama</div><div class="print-note">${esc(c.f.title)}${c.f.description?('\n\n'+esc(c.f.description)):''}</div>` : '',
+    materials: (c) => (c.ft.showMaterials && c.f.usedMaterials && c.f.usedMaterials.length) ? `<div class="print-section-title">Kullanılan Malzemeler</div>
+      <table class="print-table"><thead><tr><th style="width:auto;">Malzeme</th><th>Miktar</th><th>Tutar</th></tr></thead><tbody>
+      ${c.f.usedMaterials.map(u=>{ const m=material(u.materialId); return `<tr><td>${esc(m?m.name:'')}</td><td>${u.qty} ${m?esc(m.unit):''}</td><td>${fmtMoney(u.qty*(u.unitCost||0))}</td></tr>`; }).join('')}
+      </tbody></table>` : '',
+    costs: (c) => {
+      const totalFCost = faultCost(c.f);
+      if(totalFCost<=0) return '';
+      return `<table class="print-table">
+        <tr><th>Malzeme Maliyeti</th><td>${fmtMoney(materialsCost(c.f.usedMaterials))}</td><th>Dış Servis Ücreti</th><td>${fmtMoney(c.f.externalServiceCost)}</td></tr>
+        <tr><th>Toplam Maliyet</th><td colspan="3" style="font-weight:800;">${fmtMoney(totalFCost)}</td></tr>
+      </table>`;
+    },
+    notes: (c) => c.ft.showNotes ? `<div class="print-section-title">Çözüm Notu</div><div class="print-note"${c.f.notes?'':' style="min-height:180px;"'}>${esc(c.f.notes||'')}</div>` : '',
+    signatures: (c) => (c.ft.showSignatures && (c.ft.signatureLabels||[]).length) ? `<div class="print-signatures">${c.ft.signatureLabels.map(l=>`<div class="print-sig-box"><div class="print-sig-line"></div><div>${esc(l)}</div></div>`).join('')}</div>` : '',
+  };
+}
+
+function getMaintBlockRenderers(){
+  return {
+    header: (c) => `<div class="print-header">
+      ${c.logoUrl?`<img class="print-logo" src="${c.logoUrl}">`:''}
+      <div class="print-company">${esc(c.t.companyName||'')}</div>
+      <div class="print-title">Bakım Formu${c.r.trackingNo?' — '+esc(c.r.trackingNo):''}</div>
+    </div>`,
+    assetInfo: (c) => c.mt.showAssetInfo ? `<table class="print-table">
+      <tr><th>Varlık</th><td>${esc(c.a?c.a.name:'')}</td><th>Varlık Kodu</th><td>${esc(c.a&&c.a.assetCode||'')}</td></tr>
+      <tr><th>Seri No</th><td>${esc(c.a&&c.a.serial||'')}</td><th>Marka / Model</th><td>${esc(((c.a&&c.a.brand)||'')+' '+((c.a&&c.a.model)||''))}</td></tr>
+      <tr><th>Konum</th><td>${esc(c.a&&c.a.location||'')}</td><th>Grup</th><td>${esc(c.g?c.g.name:'')}</td></tr>
+    </table>` : '',
+    typeAndDates: (c) => c.mt.showTypeAndDates ? `<table class="print-table">
+      <tr><th>Bakım Tipi</th><td>${esc(c.r.type||'Periyodik')}</td><th>Yapan</th><td>${esc(userName(c.r.completedBy))}</td></tr>
+      <tr><th>Başlangıç</th><td>${fmtStr(c.r.startDate)}</td><th>Bitiş</th><td>${fmtStr(c.r.endDate)}</td></tr>
+    </table>` : '',
+    checklist: (c) => (c.mt.showChecklist && c.r.checklistResults && c.r.checklistResults.length) ? `<div class="print-section-title">Kontrol Listesi</div>
+      <table class="print-table"><thead><tr><th style="width:auto;">Madde</th><th>Sonuç</th></tr></thead><tbody>
+      ${c.r.checklistResults.map(q=>`<tr><td>${esc(q.text)}</td><td>${esc(q.result)}</td></tr>`).join('')}
+      </tbody></table>` : '',
+    materials: (c) => (c.mt.showMaterials && c.r.usedMaterials && c.r.usedMaterials.length) ? `<div class="print-section-title">Kullanılan Malzemeler</div>
+      <table class="print-table"><thead><tr><th style="width:auto;">Malzeme</th><th>Miktar</th><th>Tutar</th></tr></thead><tbody>
+      ${c.r.usedMaterials.map(u=>{ const m=material(u.materialId); return `<tr><td>${esc(m?m.name:'')}</td><td>${u.qty} ${m?esc(m.unit):''}</td><td>${fmtMoney(u.qty*(u.unitCost||0))}</td></tr>`; }).join('')}
+      </tbody></table>` : '',
+    costs: (c) => {
+      const totalCost = maintRecordCost(c.r);
+      if(totalCost<=0) return '';
+      return `<table class="print-table">
+        <tr><th>Malzeme Maliyeti</th><td>${fmtMoney(materialsCost(c.r.usedMaterials))}</td><th>Ek Maliyet</th><td>${fmtMoney(c.r.extraCost)}</td></tr>
+        <tr><th>Toplam Maliyet</th><td colspan="3" style="font-weight:800;">${fmtMoney(totalCost)}</td></tr>
+      </table>`;
+    },
+    notes: (c) => (c.mt.showNotes && c.r.notes) ? `<div class="print-section-title">Not</div><div class="print-note">${esc(c.r.notes)}</div>` : '',
+    signatures: (c) => (c.mt.showSignatures && (c.mt.signatureLabels||[]).length) ? `<div class="print-signatures">${c.mt.signatureLabels.map(l=>`<div class="print-sig-box"><div class="print-sig-line"></div><div>${esc(l)}</div></div>`).join('')}</div>` : '',
+  };
+}
+
 async function printMaintRecord(id){
   const r = db.maintenanceRecords.find(x=>x.id===id);
   if(!r){ alert('Kayıt bulunamadı.'); return; }
   const a = asset(r.assetId);
   const g = a ? group(a.groupId) : null;
-  const t = db.printTemplate || DEFAULT_PRINT_TEMPLATE;
-  const mt = t.maint || DEFAULT_PRINT_TEMPLATE.maint;
+  const t = migratePrintTemplate(db.printTemplate);
+  const mt = t.maint;
   const logoUrl = await fetchLogoDataUrl();
-  let html = `<div class="print-header">
-    ${logoUrl?`<img class="print-logo" src="${logoUrl}">`:''}
-    <div class="print-company">${esc(t.companyName||'')}</div>
-    <div class="print-title">Bakım Formu</div>
-  </div>`;
-  if(mt.showAssetInfo){
-    html += `<table class="print-table">
-      <tr><th>Varlık</th><td>${esc(a?a.name:'')}</td><th>Varlık Kodu</th><td>${esc(a&&a.assetCode||'')}</td></tr>
-      <tr><th>Seri No</th><td>${esc(a&&a.serial||'')}</td><th>Marka / Model</th><td>${esc(((a&&a.brand)||'')+' '+((a&&a.model)||''))}</td></tr>
-      <tr><th>Konum</th><td>${esc(a&&a.location||'')}</td><th>Grup</th><td>${esc(g?g.name:'')}</td></tr>
-    </table>`;
-  }
-  if(mt.showTypeAndDates){
-    html += `<table class="print-table">
-      <tr><th>Bakım Tipi</th><td>${esc(r.type||'Periyodik')}</td><th>Yapan</th><td>${esc(userName(r.completedBy))}</td></tr>
-      <tr><th>Başlangıç</th><td>${fmtStr(r.startDate)}</td><th>Bitiş</th><td>${fmtStr(r.endDate)}</td></tr>
-    </table>`;
-  }
-  if(mt.showChecklist && r.checklistResults.length){
-    html += `<div class="print-section-title">Kontrol Listesi</div>
-      <table class="print-table"><thead><tr><th style="width:auto;">Madde</th><th>Sonuç</th></tr></thead><tbody>
-      ${r.checklistResults.map(q=>`<tr><td>${esc(q.text)}</td><td>${esc(q.result)}</td></tr>`).join('')}
-      </tbody></table>`;
-  }
-  if(mt.showMaterials && r.usedMaterials.length){
-    html += `<div class="print-section-title">Kullanılan Malzemeler</div>
-      <table class="print-table"><thead><tr><th style="width:auto;">Malzeme</th><th>Miktar</th><th>Tutar</th></tr></thead><tbody>
-      ${r.usedMaterials.map(u=>{ const m=material(u.materialId); return `<tr><td>${esc(m?m.name:'')}</td><td>${u.qty} ${m?esc(m.unit):''}</td><td>${fmtMoney(u.qty*(u.unitCost||0))}</td></tr>`; }).join('')}
-      </tbody></table>`;
-  }
-  const totalCost = maintRecordCost(r);
-  if(totalCost>0){
-    html += `<table class="print-table">
-      <tr><th>Malzeme Maliyeti</th><td>${fmtMoney(materialsCost(r.usedMaterials))}</td><th>Ek Maliyet</th><td>${fmtMoney(r.extraCost)}</td></tr>
-      <tr><th>Toplam Maliyet</th><td colspan="3" style="font-weight:800;">${fmtMoney(totalCost)}</td></tr>
-    </table>`;
-  }
-  if(mt.showNotes && r.notes){
-    html += `<div class="print-section-title">Not</div><div class="print-note">${esc(r.notes)}</div>`;
-  }
-  if(mt.showSignatures && (mt.signatureLabels||[]).length){
-    html += `<div class="print-signatures">${mt.signatureLabels.map(l=>`<div class="print-sig-box"><div class="print-sig-line"></div><div>${esc(l)}</div></div>`).join('')}</div>`;
-  }
+  const ctx = { r, a, g, t, mt, logoUrl };
+  const renderers = getMaintBlockRenderers();
+  const order = mt.blockOrder && mt.blockOrder.length ? mt.blockOrder : ['header','assetInfo','typeAndDates','checklist','materials','costs','notes','signatures'];
+  let html = order.map(k => renderers[k] ? renderers[k](ctx) : '').join('');
   if(t.footerNote){ html += `<div class="print-footer">${esc(t.footerNote)}</div>`; }
   openPrintWindow(html, `@page{ size:${t.pageSize||'A4'} ${t.orientation||'portrait'}; margin:16mm; }`);
 }
@@ -782,47 +837,13 @@ async function printFaultRecord(id){
   if(!f){ alert('Kayıt bulunamadı.'); return; }
   const a = asset(f.assetId);
   const g = a ? group(a.groupId) : null;
-  const t = db.printTemplate || DEFAULT_PRINT_TEMPLATE;
-  const ft = t.fault || DEFAULT_PRINT_TEMPLATE.fault;
+  const t = migratePrintTemplate(db.printTemplate);
+  const ft = t.fault;
   const logoUrl = await fetchLogoDataUrl();
-  let html = `<div class="print-header">
-    ${logoUrl?`<img class="print-logo" src="${logoUrl}">`:''}
-    <div class="print-company">${esc(t.companyName||'')}</div>
-    <div class="print-title">Arıza Formu${f.trackingNo?' — '+esc(f.trackingNo):''}</div>
-  </div>`;
-  if(ft.showAssetInfo){
-    html += `<table class="print-table">
-      <tr><th>Takip No</th><td>${esc(f.trackingNo||'')}</td><th>Varlık</th><td>${esc(a?a.name:'')}</td></tr>
-      <tr><th>Varlık Kodu</th><td>${esc((a&&a.assetCode)||'')}</td><th>Konum</th><td>${esc((a&&a.location)||'')}</td></tr>
-      <tr><th>Grup</th><td>${esc(g?g.name:'')}</td><th>Atanan</th><td>${esc(userName(f.assignedTo))}</td></tr>
-    </table>`;
-  }
-  if(ft.showPriorityStatus){
-    html += `<table class="print-table">
-      <tr><th>Öncelik</th><td>${esc(f.priority)}</td><th>Durum</th><td>${esc(f.status)}</td></tr>
-      <tr><th>Bildirim Tarihi</th><td>${fmtStr(f.reportedDate)}</td><th>Kapanış Tarihi</th><td>${f.resolvedDate?fmtStr(f.resolvedDate):'—'}</td></tr>
-    </table>`;
-  }
-  if(ft.showDescription){
-    html += `<div class="print-section-title">Başlık / Açıklama</div><div class="print-note">${esc(f.title)}${f.description?('\n\n'+f.description):''}</div>`;
-  }
-  if(ft.showMaterials && f.usedMaterials && f.usedMaterials.length){
-    html += `<div class="print-section-title">Kullanılan Malzemeler</div>
-      <table class="print-table"><thead><tr><th style="width:auto;">Malzeme</th><th>Miktar</th><th>Tutar</th></tr></thead><tbody>
-      ${f.usedMaterials.map(u=>{ const m=material(u.materialId); return `<tr><td>${esc(m?m.name:'')}</td><td>${u.qty} ${m?esc(m.unit):''}</td><td>${fmtMoney(u.qty*(u.unitCost||0))}</td></tr>`; }).join('')}
-      </tbody></table>`;
-  }
-  const totalFCost = faultCost(f);
-  if(totalFCost>0){
-    html += `<table class="print-table">
-      <tr><th>Malzeme Maliyeti</th><td>${fmtMoney(materialsCost(f.usedMaterials))}</td><th>Dış Servis Ücreti</th><td>${fmtMoney(f.externalServiceCost)}</td></tr>
-      <tr><th>Toplam Maliyet</th><td colspan="3" style="font-weight:800;">${fmtMoney(totalFCost)}</td></tr>
-    </table>`;
-  }
-  if(ft.showNotes){ html += `<div class="print-section-title">Çözüm Notu</div><div class="print-note"${f.notes?'':' style="min-height:230px;"'}>${esc(f.notes||'')}</div>`; }
-  if(ft.showSignatures && (ft.signatureLabels||[]).length){
-    html += `<div class="print-signatures">${ft.signatureLabels.map(l=>`<div class="print-sig-box"><div class="print-sig-line"></div><div>${esc(l)}</div></div>`).join('')}</div>`;
-  }
+  const ctx = { f, a, g, t, ft, logoUrl };
+  const renderers = getFaultBlockRenderers();
+  const order = ft.blockOrder && ft.blockOrder.length ? ft.blockOrder : ['header','assetInfo','priorityStatus','description','materials','costs','notes','signatures'];
+  let html = order.map(k => renderers[k] ? renderers[k](ctx) : '').join('');
   if(t.footerNote){ html += `<div class="print-footer">${esc(t.footerNote)}</div>`; }
   openPrintWindow(html, `@page{ size:${t.pageSize||'A4'} ${t.orientation||'portrait'}; margin:16mm; }`);
 }
@@ -1487,6 +1508,7 @@ window.openMaintForm = function(opts){
     <div class="field" style="margin-top:12px;"><label class="f-label" for="m-maintnote">Genel Not</label><textarea id="m-maintnote">${editing?esc(rec.notes||''):''}</textarea></div>
     <div class="actions">
       ${editing?`<button class="ghost" onclick="printMaintRecord('${opts.recordId}')">🖨️ Yazdır</button>`:''}
+      ${(editing && can('manageTemplates')) ? `<button class="ghost" onclick="closeModal(); goTab('settings'); settingsTab='print'; designerFormTab='maint'; renderApp();" title="Bakım Form Şablonunu Düzenle">📐 Form Şablonunu Düzenle</button>` : ''}
       <div class="spacer"></div>
       <button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveMaintForm('${editing?opts.recordId:''}')">${editing?'Kaydet':'Bakımı Tamamla'}</button>
     </div>
@@ -2160,6 +2182,7 @@ window.openFaultDetail = function(id){
     <div class="field" style="margin-top:10px;"><label class="f-label" for="m-fnote">Çözüm Notu</label><textarea id="m-fnote">${esc(f.notes||'')}</textarea></div>
     <div class="actions">
       <button class="ghost" onclick="printFaultRecord('${id}')">🖨️ Yazdır</button>
+      ${can('manageTemplates') ? `<button class="ghost" onclick="closeModal(); goTab('settings'); settingsTab='print'; designerFormTab='fault'; renderApp();" title="Arıza Form Şablonunu Düzenle">📐 Form Şablonunu Düzenle</button>` : ''}
       <div class="spacer"></div>
       <button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveFaultDetail('${id}')">Kaydet</button>
     </div>
@@ -3135,13 +3158,91 @@ window.exportCostReport = function(){
 };
 
 // ================= BASKI AYARLARI =================
+// ================= BASKI AYARLARI & FORM TASARIMCISI =================
 let settingsTab = 'print';
+let designerFormTab = 'fault'; // 'fault' | 'maint' | 'general'
+let currentDesignerLogoUrl = '';
+
+const SAMPLE_FAULT_PREVIEW = {
+  trackingNo: 'A00105',
+  priority: 'Yüksek',
+  status: 'Devam Ediyor',
+  reportedDate: '2026-09-15',
+  resolvedDate: null,
+  title: 'Hidrolik Pompada Basınç Düşüşü ve Yağ Kaçağı',
+  description: 'Ana hat besleme pompası çalışma basıncına ulaşamıyor. Gövde altından yağ sızıntısı gözlemlendi.',
+  notes: 'Salmastra takımı ve conta seti değiştirildi. Basınç testi 160 bar seviyesinde başarıyla tamamlandı.',
+  externalServiceCost: 1500,
+  usedMaterials: [
+    { materialId: 'm1', qty: 5, unitCost: 120 },
+    { materialId: 'm3', qty: 2, unitCost: 450 }
+  ]
+};
+
+const SAMPLE_MAINT_PREVIEW = {
+  trackingNo: 'B00084',
+  type: 'Periyodik',
+  startDate: '2026-09-16',
+  endDate: '2026-09-16',
+  notes: 'Tüm periyodik kontroller yapıldı, filtre elemanları yenilendi.',
+  extraCost: 350,
+  checklistResults: [
+    { text: 'Yağ seviyesi kontrolü', result: 'Uygun' },
+    { text: 'Sızıntı kontrolü', result: 'Giderildi' },
+    { text: 'Titreşim / gürültü testi', result: 'Normal' },
+    { text: 'Filtre durumu', result: 'Değiştirildi' }
+  ],
+  usedMaterials: [
+    { materialId: 'm2', qty: 2, unitCost: 280 },
+    { materialId: 'm4', qty: 1, unitCost: 150 }
+  ]
+};
+
+const SAMPLE_ASSET_PREVIEW = {
+  name: 'Hidrolik Pompa 01',
+  assetCode: 'HP-1001',
+  location: 'Üretim Hattı 2 - Pres Bölümü',
+  serial: 'GR-884210',
+  brand: 'Grundfos',
+  model: 'CR 15-4'
+};
+const SAMPLE_GROUP_PREVIEW = { name: 'Hidrolik Sistemler' };
+
+const FAULT_BLOCK_DEFS = [
+  { id: 'header', name: 'Üstbilgi, Logo & Şirket Ünvanı', icon: '🏢', prop: null },
+  { id: 'assetInfo', name: 'Varlık & Ekipman Bilgileri', icon: '🏷️', prop: 'showAssetInfo' },
+  { id: 'priorityStatus', name: 'Öncelik, Durum & Tarihler', icon: '⏱️', prop: 'showPriorityStatus' },
+  { id: 'description', name: 'Arıza Başlığı & Detaylı Açıklama', icon: '📝', prop: 'showDescription' },
+  { id: 'materials', name: 'Kullanılan Malzemeler Tablosu', icon: '📦', prop: 'showMaterials' },
+  { id: 'costs', name: 'Maliyet Özeti (Malzeme + Servis)', icon: '💰', prop: null },
+  { id: 'notes', name: 'Teknisyen Çözüm Notu', icon: '🔧', prop: 'showNotes' },
+  { id: 'signatures', name: 'İmza & Onay Alanları', icon: '✍️', prop: 'showSignatures' },
+];
+
+const MAINT_BLOCK_DEFS = [
+  { id: 'header', name: 'Üstbilgi, Logo & Şirket Ünvanı', icon: '🏢', prop: null },
+  { id: 'assetInfo', name: 'Varlık & Ekipman Bilgileri', icon: '🏷️', prop: 'showAssetInfo' },
+  { id: 'typeAndDates', name: 'Bakım Tipi & Başlangıç/Bitiş Tarihi', icon: '📅', prop: 'showTypeAndDates' },
+  { id: 'checklist', name: 'Kontrol Listesi (Checklist) Tablosu', icon: '✅', prop: 'showChecklist' },
+  { id: 'materials', name: 'Kullanılan Malzemeler Tablosu', icon: '📦', prop: 'showMaterials' },
+  { id: 'costs', name: 'Maliyet Özeti (Malzeme + Ek Maliyet)', icon: '💰', prop: null },
+  { id: 'notes', name: 'Genel Bakım Notu', icon: '📝', prop: 'showNotes' },
+  { id: 'signatures', name: 'İmza & Onay Alanları', icon: '✍️', prop: 'showSignatures' },
+];
+
 function renderSettings(el){
-  el.innerHTML = `<div class="topbar"><div><h1>Ayarlar</h1><div class="sub">Baskı şablonu, kullanıcı yönetimi ve toplu yükleme</div></div></div>
+  if(!can('manageTemplates')){
+    el.innerHTML = `<div class="panel" style="padding:24px; text-align:center;">
+      <h2 style="color:var(--danger); margin-bottom:8px;">🔒 Yetkisiz Erişim</h2>
+      <p class="muted">Form şablonlarını ve sistem ayarlarını görüntüleme/düzenleme yetkisi yalnızca <b>Yönetici</b> rolüne aittir.</p>
+    </div>`;
+    return;
+  }
+  el.innerHTML = `<div class="topbar"><div><h1>Ayarlar &amp; Form Tasarımcısı</h1><div class="sub">Kurumsal form şablonları, kullanıcı yönetimi ve toplu veri yükleme</div></div></div>
     <div class="tabs">
-      <button class="${settingsTab==='print'?'active':''}" onclick="settingsTab='print'; renderTab();">Baskı Ayarları</button>
-      <button class="${settingsTab==='users'?'active':''}" onclick="settingsTab='users'; renderTab();">Kullanıcılar</button>
-      <button class="${settingsTab==='import'?'active':''}" onclick="settingsTab='import'; renderTab();">Toplu Yükleme</button>
+      <button class="${settingsTab==='print'?'active':''}" onclick="settingsTab='print'; renderTab();">📐 Form Şablon Tasarımcısı</button>
+      <button class="${settingsTab==='users'?'active':''}" onclick="settingsTab='users'; renderTab();">👥 Kullanıcılar</button>
+      <button class="${settingsTab==='import'?'active':''}" onclick="settingsTab='import'; renderTab();">📥 Toplu Yükleme</button>
     </div>
     <div id="settingsBody"></div>`;
   const body = document.getElementById('settingsBody');
@@ -3149,133 +3250,349 @@ function renderSettings(el){
   else if(settingsTab==='users') renderUsers(body);
   else renderImportSettings(body);
 }
+
 function renderPrintSettings(body){
-  const t = db.printTemplate || DEFAULT_PRINT_TEMPLATE;
-  const mt = t.maint || DEFAULT_PRINT_TEMPLATE.maint;
-  const ft = t.fault || DEFAULT_PRINT_TEMPLATE.fault;
+  const t = migratePrintTemplate(db.printTemplate);
+  db.printTemplate = t;
+
+  let contentHtml = '';
+
+  if(designerFormTab === 'general'){
+    contentHtml = `
+      <div class="panel">
+        <h2>Genel Sayfa &amp; Logo Ayarları</h2>
+        <div class="grid2">
+          <div class="field"><label class="f-label" for="s-company">Firma / Başlık Adı</label><input id="s-company" type="text" value="${esc(t.companyName)}" oninput="updateLiveGeneralInfo()"></div>
+          <div class="field"><label class="f-label" for="s-footer">Alt Not (Dipnot Metni)</label><input id="s-footer" type="text" value="${esc(t.footerNote)}" oninput="updateLiveGeneralInfo()"></div>
+          <div class="field"><label class="f-label" for="s-pagesize">Kağıt Boyutu</label><select id="s-pagesize" onchange="updateLiveGeneralInfo()">
+            <option ${t.pageSize==='A4'?'selected':''}>A4</option><option ${t.pageSize==='A5'?'selected':''}>A5</option>
+          </select></div>
+          <div class="field"><label class="f-label" for="s-orient">Yön</label><select id="s-orient" onchange="updateLiveGeneralInfo()">
+            <option value="portrait" ${t.orientation==='portrait'?'selected':''}>Dikey</option>
+            <option value="landscape" ${t.orientation==='landscape'?'selected':''}>Yatay</option>
+          </select></div>
+        </div>
+        <div class="field" style="margin-top:14px;"><label class="f-label">Kurumsal Logo</label>
+          <div id="logoPreviewWrap" class="row" style="margin-bottom:8px;"><span class="muted tiny">Yükleniyor...</span></div>
+          <input type="file" accept="image/*" onchange="uploadLogo(this)">
+          <div class="muted tiny" style="margin-top:4px;">Önerilen: Şeffaf arka planlı PNG formatı. 2 MB'ı geçmemelidir.</div>
+        </div>
+        <div style="margin-top:16px;">
+          <button class="primary" onclick="saveSettings()">💾 Genel Ayarları Kaydet</button>
+        </div>
+      </div>
+    `;
+  } else {
+    const isFault = designerFormTab === 'fault';
+    contentHtml = `
+      <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start;">
+        <!-- Sol Sütun: Blok Düzenleyici & Ayarlar -->
+        <div style="flex:1 1 380px; min-width:320px;">
+          <div class="panel" style="margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+              <h3 style="margin:0;">${isFault ? '⚠️ Arıza Formu Blokları' : '🛠️ Bakım Formu Blokları'}</h3>
+              <span class="badge ok" style="font-size:11px;">Admin Yetkisi</span>
+            </div>
+            <p class="muted tiny" style="margin-bottom:12px;">Blokları <b>▲</b> ve <b>▼</b> butonlarıyla yukarı-aşağı taşıyabilir, formda görünmesini istemediğiniz alanların işaretini kaldırabilirsiniz. Değişiklikler sağdaki A4 önizlemede anında görünür.</p>
+            <div id="designerBlockList"></div>
+            <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
+              <button class="primary" onclick="saveSettings()">💾 Şablonu Kaydet</button>
+              <button class="ghost" onclick="previewPrintTemplate('${designerFormTab}')">🖨️ Test Çıktısı Al</button>
+              <button class="ghost" onclick="resetTemplateToDefault('${designerFormTab}')" style="color:var(--danger);">↺ Sıfırla</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sağ Sütun: Canlı A4 Kağıt Önizlemesi -->
+        <div style="flex:1 1 480px; min-width:340px; position:sticky; top:15px;">
+          <div style="background:#1e293b; border-radius:8px; padding:16px; box-shadow:0 4px 15px rgba(0,0,0,0.15);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; color:#fff;">
+              <span style="font-weight:700; font-size:13px; letter-spacing:.02em;">📄 Canlı A4 Baskı Önizlemesi</span>
+              <span style="font-size:11px; color:#94a3b8;">Gerçek A4 Görünümü (Örnek Veri)</span>
+            </div>
+            <div style="background:#475569; padding:16px; border-radius:6px; display:flex; justify-content:center; max-height:750px; overflow-y:auto;">
+              <div id="a4LiveCanvas" style="width:100%; max-width:520px; background:#fff; padding:20px; border-radius:3px; box-shadow:0 8px 25px rgba(0,0,0,0.35); font-size:11px; line-height:1.4; color:#000; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+                <div class="muted tiny" style="text-align:center; padding:30px;">Önizleme yükleniyor...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   body.innerHTML = `
-  <div class="panel">
-    <h2>Genel</h2>
-    <div class="grid2">
-      <div class="field"><label class="f-label" for="s-company">Firma / Başlık Adı</label><input id="s-company" type="text" value="${esc(t.companyName)}"></div>
-      <div class="field"><label class="f-label" for="s-footer">Alt Not (dipnot)</label><input id="s-footer" type="text" value="${esc(t.footerNote)}"></div>
-      <div class="field"><label class="f-label" for="s-pagesize">Kağıt Boyutu</label><select id="s-pagesize">
-        <option ${t.pageSize==='A4'?'selected':''}>A4</option><option ${t.pageSize==='A5'?'selected':''}>A5</option>
-      </select></div>
-      <div class="field"><label class="f-label" for="s-orient">Yön</label><select id="s-orient">
-        <option value="portrait" ${t.orientation==='portrait'?'selected':''}>Dikey</option>
-        <option value="landscape" ${t.orientation==='landscape'?'selected':''}>Yatay</option>
-      </select></div>
+    <div class="panel" style="margin-bottom:14px; padding:12px 16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <div>
+          <div style="font-weight:800; font-size:15px;">Form Tasarımcısı &amp; Şablonlar</div>
+          <div class="muted tiny">Çıktı formlarının yapısını sürükle-bırak mantığıyla özelleştirin</div>
+        </div>
+        <div class="tabs" style="margin:0; border:none;">
+          <button class="${designerFormTab==='fault'?'active':''}" onclick="designerFormTab='fault'; renderTab();">⚠️ Arıza Formu</button>
+          <button class="${designerFormTab==='maint'?'active':''}" onclick="designerFormTab='maint'; renderTab();">🛠️ Bakım Formu</button>
+          <button class="${designerFormTab==='general'?'active':''}" onclick="designerFormTab='general'; renderTab();">⚙️ Kağıt &amp; Logo</button>
+        </div>
+      </div>
     </div>
-    <div class="field" style="margin-top:14px;"><label class="f-label">Logo</label>
-      <div id="logoPreviewWrap" class="row" style="margin-bottom:8px;"><span class="muted tiny">Yükleniyor...</span></div>
-      <input type="file" accept="image/*" onchange="uploadLogo(this)">
-      <div class="muted tiny" style="margin-top:4px;">Önerilen: küçük, şeffaf arka planlı PNG. 1 MB'ı geçmemelidir.</div>
-    </div>
-  </div>
-
-  <div class="panel">
-    <h2>Bakım Formu</h2>
-    <label style="display:block; margin-bottom:6px; font-size:13px;"><input type="checkbox" id="s-m-showasset" ${mt.showAssetInfo?'checked':''}> Varlık Bilgileri</label>
-    <label style="display:block; margin-bottom:6px; font-size:13px;"><input type="checkbox" id="s-m-showtype" ${mt.showTypeAndDates?'checked':''}> Bakım Tipi ve Tarihleri</label>
-    <label style="display:block; margin-bottom:6px; font-size:13px;"><input type="checkbox" id="s-m-showchecklist" ${mt.showChecklist?'checked':''}> Kontrol Listesi Sonuçları</label>
-    <label style="display:block; margin-bottom:6px; font-size:13px;"><input type="checkbox" id="s-m-showmaterials" ${mt.showMaterials?'checked':''}> Kullanılan Malzemeler</label>
-    <label style="display:block; margin-bottom:6px; font-size:13px;"><input type="checkbox" id="s-m-shownotes" ${mt.showNotes?'checked':''}> Genel Not</label>
-    <label style="display:block; margin-bottom:6px; font-size:13px;"><input type="checkbox" id="s-m-showsig" ${mt.showSignatures?'checked':''}> İmza Alanları</label>
-    <div class="field" style="margin-top:8px;"><label class="f-label">İmza Alanları (her satıra bir etiket)</label>
-      <textarea id="s-m-siglabels" style="min-height:70px;">${esc((mt.signatureLabels||[]).join('\n'))}</textarea>
-    </div>
-    <button class="ghost small" style="margin-top:8px;" onclick="previewPrintTemplate('maint')">Örnek Önizleme (Yazdır)</button>
-  </div>
-
-  <div class="panel">
-    <h2>Arıza Formu</h2>
-    <label style="display:block; margin-bottom:6px; font-size:13px;"><input type="checkbox" id="s-f-showasset" ${ft.showAssetInfo?'checked':''}> Varlık Bilgileri</label>
-    <label style="display:block; margin-bottom:6px; font-size:13px;"><input type="checkbox" id="s-f-showprio" ${ft.showPriorityStatus?'checked':''}> Öncelik / Durum / Tarihler</label>
-    <label style="display:block; margin-bottom:6px; font-size:13px;"><input type="checkbox" id="s-f-showdesc" ${ft.showDescription?'checked':''}> Başlık / Açıklama</label>
-    <label style="display:block; margin-bottom:6px; font-size:13px;"><input type="checkbox" id="s-f-showmaterials" ${ft.showMaterials?'checked':''}> Kullanılan Malzemeler</label>
-    <label style="display:block; margin-bottom:6px; font-size:13px;"><input type="checkbox" id="s-f-shownotes" ${ft.showNotes?'checked':''}> Çözüm Notu</label>
-    <label style="display:block; margin-bottom:6px; font-size:13px;"><input type="checkbox" id="s-f-showsig" ${ft.showSignatures?'checked':''}> İmza Alanları</label>
-    <div class="field" style="margin-top:8px;"><label class="f-label">İmza Alanları (her satıra bir etiket)</label>
-      <textarea id="s-f-siglabels" style="min-height:70px;">${esc((ft.signatureLabels||[]).join('\n'))}</textarea>
-    </div>
-    <button class="ghost small" style="margin-top:8px;" onclick="previewPrintTemplate('fault')">Örnek Önizleme (Yazdır)</button>
-  </div>
-
-  <button class="primary" onclick="saveSettings()">Tüm Baskı Ayarlarını Kaydet</button>
+    ${contentHtml}
   `;
-  loadLogoPreview();
+
+  if(designerFormTab === 'general'){
+    loadLogoPreview();
+  } else {
+    renderDesignerBlocks(designerFormTab);
+    fetchLogoDataUrl().then(url => {
+      currentDesignerLogoUrl = url || '';
+      renderLivePreview(designerFormTab);
+    });
+  }
 }
+
+function renderDesignerBlocks(kind){
+  const container = document.getElementById('designerBlockList');
+  if(!container) return;
+  const t = migratePrintTemplate(db.printTemplate);
+  const target = t[kind];
+  const defs = kind === 'fault' ? FAULT_BLOCK_DEFS : MAINT_BLOCK_DEFS;
+  const defsMap = {};
+  defs.forEach(d => { defsMap[d.id] = d; });
+
+  const order = (target.blockOrder && target.blockOrder.length) ? target.blockOrder : defs.map(d=>d.id);
+
+  let html = `<div style="display:flex; flex-direction:column; gap:8px;">`;
+  order.forEach((blockId, idx) => {
+    const def = defsMap[blockId];
+    if(!def) return;
+    const isEnabled = def.prop ? (target[def.prop] !== false) : true;
+
+    html += `
+      <div style="background:#f8fafc; border:1px solid var(--line); border-radius:7px; padding:10px 12px; display:flex; flex-direction:column; gap:6px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:16px;">${def.icon}</span>
+            <label style="font-weight:600; font-size:13px; cursor:${def.prop?'pointer':'default'}; display:flex; align-items:center; gap:6px;">
+              ${def.prop ? `<input type="checkbox" ${isEnabled?'checked':''} onchange="toggleBlockEnabled('${kind}', '${blockId}')">` : `<span style="color:var(--ok); font-size:12px;">●</span>`}
+              ${esc(def.name)}
+            </label>
+          </div>
+          <div style="display:flex; gap:3px;">
+            <button class="ghost small" style="padding:3px 8px; font-size:11px;" onclick="moveBlock('${kind}', ${idx}, -1)" ${idx===0?'disabled':''} title="Yukarı Taşı">▲</button>
+            <button class="ghost small" style="padding:3px 8px; font-size:11px;" onclick="moveBlock('${kind}', ${idx}, 1)" ${idx===order.length-1?'disabled':''} title="Aşağı Taşı">▼</button>
+          </div>
+        </div>
+        ${blockId==='signatures' ? `
+          <div style="margin-top:4px; padding-top:6px; border-top:1px dashed #cbd5e1;">
+            <div style="font-size:11px; font-weight:600; color:var(--ink-soft); margin-bottom:4px;">İmza Kutuları (Her satıra bir yetkili unvanı):</div>
+            <textarea style="width:100%; min-height:55px; font-size:12px; padding:4px 8px; font-family:var(--sans);" oninput="updateSignatureLabels('${kind}', this.value)">${esc((target.signatureLabels||[]).join('\n'))}</textarea>
+          </div>
+        ` : ''}
+      </div>
+    `;
+  });
+  html += `</div>`;
+  container.innerHTML = html;
+}
+
+function renderLivePreview(kind){
+  const preview = document.getElementById('a4LiveCanvas');
+  if(!preview) return;
+  const t = migratePrintTemplate(db.printTemplate);
+  const logoUrl = currentDesignerLogoUrl || '';
+
+  if(kind === 'fault'){
+    const ft = t.fault;
+    const f = SAMPLE_FAULT_PREVIEW;
+    const a = SAMPLE_ASSET_PREVIEW;
+    const g = SAMPLE_GROUP_PREVIEW;
+    const ctx = { f, a, g, t, ft, logoUrl };
+    const renderers = getFaultBlockRenderers();
+    const order = ft.blockOrder && ft.blockOrder.length ? ft.blockOrder : ['header','assetInfo','priorityStatus','description','materials','costs','notes','signatures'];
+    let html = order.map(k => renderers[k] ? renderers[k](ctx) : '').join('');
+    if(t.footerNote){ html += `<div class="print-footer">${esc(t.footerNote)}</div>`; }
+    preview.innerHTML = html;
+  } else if(kind === 'maint'){
+    const mt = t.maint;
+    const r = SAMPLE_MAINT_PREVIEW;
+    const a = SAMPLE_ASSET_PREVIEW;
+    const g = SAMPLE_GROUP_PREVIEW;
+    const ctx = { r, a, g, t, mt, logoUrl };
+    const renderers = getMaintBlockRenderers();
+    const order = mt.blockOrder && mt.blockOrder.length ? mt.blockOrder : ['header','assetInfo','typeAndDates','checklist','materials','costs','notes','signatures'];
+    let html = order.map(k => renderers[k] ? renderers[k](ctx) : '').join('');
+    if(t.footerNote){ html += `<div class="print-footer">${esc(t.footerNote)}</div>`; }
+    preview.innerHTML = html;
+  }
+}
+
+window.toggleBlockEnabled = function(kind, blockId){
+  if(!can('manageTemplates')) return;
+  const t = migratePrintTemplate(db.printTemplate);
+  const target = t[kind];
+  if(!target) return;
+  const keyMap = {
+    assetInfo: 'showAssetInfo',
+    priorityStatus: 'showPriorityStatus',
+    typeAndDates: 'showTypeAndDates',
+    checklist: 'showChecklist',
+    description: 'showDescription',
+    materials: 'showMaterials',
+    notes: 'showNotes',
+    signatures: 'showSignatures'
+  };
+  const prop = keyMap[blockId];
+  if(prop){
+    target[prop] = !target[prop];
+  }
+  db.printTemplate = t;
+  renderDesignerBlocks(kind);
+  renderLivePreview(kind);
+};
+
+window.moveBlock = function(kind, idx, dir){
+  if(!can('manageTemplates')) return;
+  const t = migratePrintTemplate(db.printTemplate);
+  const target = t[kind];
+  if(!target || !target.blockOrder) return;
+  const newIdx = idx + dir;
+  if(newIdx < 0 || newIdx >= target.blockOrder.length) return;
+  const item = target.blockOrder.splice(idx, 1)[0];
+  target.blockOrder.splice(newIdx, 0, item);
+  db.printTemplate = t;
+  renderDesignerBlocks(kind);
+  renderLivePreview(kind);
+};
+
+window.updateSignatureLabels = function(kind, text){
+  if(!can('manageTemplates')) return;
+  const t = migratePrintTemplate(db.printTemplate);
+  const target = t[kind];
+  if(!target) return;
+  target.signatureLabels = text.split('\n').map(s=>s.trim()).filter(Boolean);
+  db.printTemplate = t;
+  renderLivePreview(kind);
+};
+
+window.resetTemplateToDefault = function(kind){
+  if(!can('manageTemplates')) return;
+  if(!confirm('Bu form için blok düzeni standart ayarlara döndürülecek. Emin misiniz?')) return;
+  const t = migratePrintTemplate(db.printTemplate);
+  t[kind] = JSON.parse(JSON.stringify(DEFAULT_PRINT_TEMPLATE[kind]));
+  db.printTemplate = t;
+  renderTab();
+};
+
+window.updateLiveGeneralInfo = function(){
+  const t = migratePrintTemplate(db.printTemplate);
+  const compEl = document.getElementById('s-company');
+  if(compEl) t.companyName = compEl.value.trim();
+  const footEl = document.getElementById('s-footer');
+  if(footEl) t.footerNote = footEl.value.trim();
+  const pageEl = document.getElementById('s-pagesize');
+  if(pageEl) t.pageSize = pageEl.value;
+  const orientEl = document.getElementById('s-orient');
+  if(orientEl) t.orientation = orientEl.value;
+  db.printTemplate = t;
+};
+
 async function loadLogoPreview(){
   const wrap = document.getElementById('logoPreviewWrap');
   if(!wrap) return;
   const t = db.printTemplate || DEFAULT_PRINT_TEMPLATE;
-  if(!t.logoKey){ wrap.innerHTML = `<span class="muted tiny">Logo yüklenmedi.</span>`; return; }
+  if(!t.logoKey && !t.logoStorageKey){ wrap.innerHTML = `<span class="muted tiny">Logo yüklenmedi.</span>`; return; }
   const url = await fetchLogoDataUrl();
   if(!url){ wrap.innerHTML = `<span class="muted tiny">Logo yüklenmedi.</span>`; return; }
-  wrap.innerHTML = `<img src="${url}" style="max-height:50px; max-width:180px; border:1px solid var(--line); border-radius:6px; padding:4px;">
+  wrap.innerHTML = `<img src="${url}" style="max-height:50px; max-width:180px; border:1px solid var(--line); border-radius:6px; padding:4px; background:#fff;">
     <button class="ghost small" onclick="removeLogo()">Kaldır</button>`;
 }
-window.uploadLogo = function(inputEl){
-  const file = inputEl.files[0];
+
+window.uploadLogo = async function(inputEl){
+  if(!can('manageTemplates')){
+    alert('Bu işlem için Yönetici yetkisine sahip olmalısınız.');
+    return;
+  }
+  const file = inputEl.files && inputEl.files[0];
   if(!file) return;
-  if(file.size > 1024*1024){ alert("Logo 1 MB'ı geçmemelidir."); inputEl.value=''; return; }
+  if(file.size > 2*1024*1024){ alert("Logo 2 MB'ı geçmemelidir."); inputEl.value=''; return; }
+
+  if(window.CMMS_API && window.CMMS_API.uploadLogo){
+    try{
+      const res = await window.CMMS_API.uploadLogo(file);
+      if(res && res.logoStorageKey){
+        db.printTemplate.logoStorageKey = res.logoStorageKey;
+        db.printTemplate.logoKey = null;
+      }
+      currentDesignerLogoUrl = await fetchLogoDataUrl();
+      if(window.toast) window.toast.success('Logo başarıyla yüklendi.');
+      loadLogoPreview();
+      renderLivePreview(designerFormTab);
+      return;
+    }catch(err){
+      console.warn('Backend logo upload failed, trying local fallback:', err);
+    }
+  }
+
   const reader = new FileReader();
   reader.onload = async function(){
     try{
       await window.storage.set('cmms-logo', reader.result, true);
       db.printTemplate.logoKey = 'cmms-logo';
+      db.printTemplate.logoStorageKey = null;
+      currentDesignerLogoUrl = reader.result;
       await saveDB();
       loadLogoPreview();
+      renderLivePreview(designerFormTab);
     }catch(e){ alert('Logo kaydedilemedi.'); }
   };
   reader.readAsDataURL(file);
 };
+
 window.removeLogo = async function(){
+  if(!can('manageTemplates')){
+    alert('Bu işlem için Yönetici yetkisine sahip olmalısınız.');
+    return;
+  }
+  if(window.CMMS_API && window.CMMS_API.deleteLogo && db.printTemplate.logoStorageKey){
+    try{ await window.CMMS_API.deleteLogo(); }catch(e){}
+  }
   const key = db.printTemplate.logoKey;
   db.printTemplate.logoKey = null;
+  db.printTemplate.logoStorageKey = null;
+  currentDesignerLogoUrl = '';
   await saveDB();
   if(key){ try{ await window.storage.delete(key, true); }catch(e){} }
   loadLogoPreview();
+  renderLivePreview(designerFormTab);
 };
+
 window.saveSettings = async function(){
-  db.printTemplate = {
-    companyName: document.getElementById('s-company').value.trim(),
-    logoKey: db.printTemplate.logoKey||null,
-    footerNote: document.getElementById('s-footer').value.trim(),
-    pageSize: document.getElementById('s-pagesize').value,
-    orientation: document.getElementById('s-orient').value,
-    maint:{
-      showAssetInfo: document.getElementById('s-m-showasset').checked,
-      showTypeAndDates: document.getElementById('s-m-showtype').checked,
-      showChecklist: document.getElementById('s-m-showchecklist').checked,
-      showMaterials: document.getElementById('s-m-showmaterials').checked,
-      showNotes: document.getElementById('s-m-shownotes').checked,
-      showSignatures: document.getElementById('s-m-showsig').checked,
-      signatureLabels: document.getElementById('s-m-siglabels').value.split('\n').map(s=>s.trim()).filter(Boolean),
-    },
-    fault:{
-      showAssetInfo: document.getElementById('s-f-showasset').checked,
-      showPriorityStatus: document.getElementById('s-f-showprio').checked,
-      showDescription: document.getElementById('s-f-showdesc').checked,
-      showMaterials: document.getElementById('s-f-showmaterials').checked,
-      showNotes: document.getElementById('s-f-shownotes').checked,
-      showSignatures: document.getElementById('s-f-showsig').checked,
-      signatureLabels: document.getElementById('s-f-siglabels').value.split('\n').map(s=>s.trim()).filter(Boolean),
-    },
-  };
+  if(!can('manageTemplates')){
+    alert('Bu işlem için Yönetici yetkisine sahip olmalısınız.');
+    return;
+  }
+  const t = migratePrintTemplate(db.printTemplate);
+  const compEl = document.getElementById('s-company');
+  if(compEl) t.companyName = compEl.value.trim();
+  const footEl = document.getElementById('s-footer');
+  if(footEl) t.footerNote = footEl.value.trim();
+  const pageEl = document.getElementById('s-pagesize');
+  if(pageEl) t.pageSize = pageEl.value;
+  const orientEl = document.getElementById('s-orient');
+  if(orientEl) t.orientation = orientEl.value;
+
+  db.printTemplate = t;
   await saveDB();
-  alert('Baskı ayarları kaydedildi.');
+  if(window.toast) window.toast.success('Form şablonu ve ayarlar başarıyla kaydedildi.');
+  else alert('Form şablonu ve ayarlar başarıyla kaydedildi.');
 };
+
 window.previewPrintTemplate = function(kind){
   if(kind==='fault'){
-    const f = db.faults[db.faults.length-1];
-    if(!f){ alert('Önizleme için önce bir arıza kaydı olmalı.'); return; }
+    const f = db.faults[db.faults.length-1] || SAMPLE_FAULT_PREVIEW;
     printFaultRecord(f.id);
     return;
   }
-  const rec = db.maintenanceRecords[db.maintenanceRecords.length-1];
-  if(!rec){ alert('Önizleme için önce tamamlanmış bir bakım kaydı olmalı.'); return; }
+  const rec = db.maintenanceRecords[db.maintenanceRecords.length-1] || SAMPLE_MAINT_PREVIEW;
   printMaintRecord(rec.id);
 };
 

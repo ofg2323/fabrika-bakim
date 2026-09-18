@@ -127,7 +127,7 @@
       targetDb.inspectionRecords = inspections || [];
       targetDb.extMaintRecords = extMaints || [];
       targetDb.projects = projects || [];
-      targetDb.printTemplate = settings || {};
+      targetDb.printTemplate = typeof migratePrintTemplate === 'function' ? migratePrintTemplate(settings) : (settings || {});
       targetDb.counters = targetDb.counters || { fault: 0, maint: 0, inspection: 0, extmaint: 0, project: 0 };
 
       // Sayaçları senkronize et
@@ -1345,38 +1345,87 @@
 
   // 16. Ayarlar & Yazdırma Şablonu Entegrasyonu
   window.saveSettings = async function() {
+    if (typeof can === 'function' && !can('manageTemplates')) {
+      window.toast.error('Bu işlem için Yönetici yetkisine sahip olmalısınız.');
+      return;
+    }
+
+    const t = typeof migratePrintTemplate === 'function'
+      ? migratePrintTemplate(window.db && window.db.printTemplate)
+      : (window.db && window.db.printTemplate ? window.db.printTemplate : {});
+
+    const compEl = document.getElementById('s-company');
+    if (compEl) t.companyName = compEl.value.trim();
+    const footEl = document.getElementById('s-footer');
+    if (footEl) t.footerNote = footEl.value.trim();
+    const pageEl = document.getElementById('s-pagesize');
+    if (pageEl) t.pageSize = pageEl.value;
+    const orientEl = document.getElementById('s-orient');
+    if (orientEl) t.orientation = orientEl.value;
+
     const payload = {
-      companyName: (document.getElementById('s-company')?.value || '').trim(),
-      footerNote: (document.getElementById('s-footer')?.value || '').trim(),
-      pageSize: document.getElementById('s-pagesize')?.value || 'A4',
-      orientation: document.getElementById('s-orient')?.value || 'portrait',
-      maint: {
-        showAssetInfo: document.getElementById('s-m-showasset')?.checked ?? true,
-        showTypeAndDates: document.getElementById('s-m-showdates')?.checked ?? true,
-        showGroupAndChecklist: document.getElementById('s-m-showgroup')?.checked ?? true,
-        showChecklistTable: document.getElementById('s-m-showcheck')?.checked ?? true,
-        showUsedMaterials: document.getElementById('s-m-showmat')?.checked ?? true,
-        showMaterialCosts: document.getElementById('s-m-showcost')?.checked ?? false,
-        showNotes: document.getElementById('s-m-shownote')?.checked ?? true,
-        showSignatures: document.getElementById('s-m-showsig')?.checked ?? true,
-      },
-      fault: {
-        showAssetInfo: document.getElementById('s-f-showasset')?.checked ?? true,
-        showDates: document.getElementById('s-f-showdates')?.checked ?? true,
-        showPriorityAndAssignee: document.getElementById('s-f-showprio')?.checked ?? true,
-        showUsedMaterials: document.getElementById('s-f-showmat')?.checked ?? true,
-        showMaterialCosts: document.getElementById('s-f-showcost')?.checked ?? false,
-        showTechnicalSolution: document.getElementById('s-f-showtech')?.checked ?? true,
-        showSignatures: document.getElementById('s-f-showsig')?.checked ?? true,
-      },
+      companyName: t.companyName,
+      footerNote: t.footerNote,
+      pageSize: t.pageSize,
+      orientation: t.orientation,
+      maint: t.maint,
+      fault: t.fault,
     };
 
     try {
       const updated = await API.updateSettings(payload);
-      if (window.db) window.db.printTemplate = updated || payload;
-      window.toast.success('Baskı ve sistem ayarları kaydedildi.');
+      if (window.db) {
+        window.db.printTemplate = typeof migratePrintTemplate === 'function' ? migratePrintTemplate(updated) : (updated || payload);
+      }
+      window.toast.success('Form şablonu ve ayarlar başarıyla kaydedildi.');
     } catch (err) {
       window.toast.error('Ayarlar kaydedilemedi: ' + err.message);
+    }
+  };
+
+  // 16b. Logo Yükleme & Kaldırma Entegrasyonu (Yalnızca Yönetici)
+  window.uploadLogo = async function(inputEl) {
+    if (typeof can === 'function' && !can('manageTemplates')) {
+      window.toast.error('Bu işlem için Yönetici yetkisine sahip olmalısınız.');
+      return;
+    }
+    const file = inputEl && inputEl.files && inputEl.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      window.toast.error("Logo 2 MB'ı geçmemelidir.");
+      inputEl.value = '';
+      return;
+    }
+    try {
+      const res = await API.uploadLogo(file);
+      if (window.db && window.db.printTemplate) {
+        window.db.printTemplate.logoStorageKey = res.logoStorageKey;
+        window.db.printTemplate.logoKey = null;
+      }
+      window.toast.success('Logo başarıyla yüklendi.');
+      if (typeof loadLogoPreview === 'function') loadLogoPreview();
+      if (typeof renderLivePreview === 'function' && typeof designerFormTab !== 'undefined') renderLivePreview(designerFormTab);
+    } catch (err) {
+      window.toast.error('Logo yüklenemedi: ' + err.message);
+    }
+  };
+
+  window.removeLogo = async function() {
+    if (typeof can === 'function' && !can('manageTemplates')) {
+      window.toast.error('Bu işlem için Yönetici yetkisine sahip olmalısınız.');
+      return;
+    }
+    try {
+      await API.deleteLogo();
+      if (window.db && window.db.printTemplate) {
+        window.db.printTemplate.logoStorageKey = null;
+        window.db.printTemplate.logoKey = null;
+      }
+      window.toast.success('Logo kaldırıldı.');
+      if (typeof loadLogoPreview === 'function') loadLogoPreview();
+      if (typeof renderLivePreview === 'function' && typeof designerFormTab !== 'undefined') renderLivePreview(designerFormTab);
+    } catch (err) {
+      window.toast.error('Logo kaldırılamadı: ' + err.message);
     }
   };
 
