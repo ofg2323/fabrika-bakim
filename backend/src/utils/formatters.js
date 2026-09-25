@@ -228,10 +228,25 @@ function safeUuid(val) {
   return isUuid(val) ? val : null;
 }
 
+function fmtDate(d) {
+  if (!d) return null;
+  if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d)) return d.slice(0, 10);
+  if (d instanceof Date) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  const s = String(d);
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  return null;
+}
+
 module.exports = {
   isUuid,
   safeUuid,
   UUID_REGEX,
+  fmtDate,
   toCamelMaterial,
   toCamelStockMovement,
   toCamelNeed,

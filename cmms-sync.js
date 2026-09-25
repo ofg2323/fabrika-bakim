@@ -115,7 +115,11 @@
         hasPassword: !!(u.hasPassword || u.has_password || u.passwordHash),
         passwordHash: (u.hasPassword || u.has_password || u.passwordHash) ? true : undefined
       }));
-      targetDb.assetGroups = (assetGroups || []).filter(g => g && isUuid(g.id));
+      targetDb.assetGroups = (assetGroups || []).filter(g => g && isUuid(g.id)).map(g => ({
+        ...g,
+        inspectionBaselineDate: g.inspectionBaselineDate ? String(g.inspectionBaselineDate).slice(0, 10) : null,
+        extMaintBaselineDate: g.extMaintBaselineDate ? String(g.extMaintBaselineDate).slice(0, 10) : null,
+      }));
       targetDb.assets = (assets || []).filter(a => a && isUuid(a.id));
       targetDb.suppliers = (suppliers || []).filter(s => s && isUuid(s.id));
       targetDb.materials = (materials || []).filter(m => m && isUuid(m.id));
@@ -185,7 +189,13 @@
   window.reloadAssetGroups = async function() {
     try {
       const groups = await API.getAssetGroups();
-      if (window.db) window.db.assetGroups = (groups || []).filter(g => g && isUuid(g.id));
+      if (window.db) {
+        window.db.assetGroups = (groups || []).filter(g => g && isUuid(g.id)).map(g => ({
+          ...g,
+          inspectionBaselineDate: g.inspectionBaselineDate ? String(g.inspectionBaselineDate).slice(0, 10) : null,
+          extMaintBaselineDate: g.extMaintBaselineDate ? String(g.extMaintBaselineDate).slice(0, 10) : null,
+        }));
+      }
     } catch (e) { console.error('reloadAssetGroups error:', e); }
   };
 
@@ -194,7 +204,11 @@
       const [assets, groups] = await Promise.all([API.getAssets(), API.getAssetGroups()]);
       if (window.db) {
         window.db.assets = (assets || []).filter(a => a && isUuid(a.id));
-        window.db.assetGroups = (groups || []).filter(g => g && isUuid(g.id));
+        window.db.assetGroups = (groups || []).filter(g => g && isUuid(g.id)).map(g => ({
+          ...g,
+          inspectionBaselineDate: g.inspectionBaselineDate ? String(g.inspectionBaselineDate).slice(0, 10) : null,
+          extMaintBaselineDate: g.extMaintBaselineDate ? String(g.extMaintBaselineDate).slice(0, 10) : null,
+        }));
       }
     } catch (e) { console.error('reloadAssets error:', e); }
   };
@@ -561,10 +575,12 @@
     const periodDays = parseInt(document.getElementById('m-period')?.value, 10) || 30;
     const inspEnabled = document.getElementById('m-inspect-enabled')?.checked || false;
     const inspDays = inspEnabled ? (parseInt(document.getElementById('m-inspect-period')?.value, 10) || 365) : null;
-    const inspBase = inspEnabled ? (document.getElementById('m-inspect-baseline')?.value || null) : null;
+    const inspRaw = document.getElementById('m-inspect-baseline')?.value;
+    const inspBase = (inspEnabled && inspRaw) ? String(inspRaw).trim().slice(0, 10) : null;
     const extEnabled = document.getElementById('m-extmaint-enabled')?.checked || false;
     const extDays = extEnabled ? (parseInt(document.getElementById('m-extmaint-period')?.value, 10) || 365) : null;
-    const extBase = extEnabled ? (document.getElementById('m-extmaint-baseline')?.value || null) : null;
+    const extRaw = document.getElementById('m-extmaint-baseline')?.value;
+    const extBase = (extEnabled && extRaw) ? String(extRaw).trim().slice(0, 10) : null;
 
     const payload = {
       name,

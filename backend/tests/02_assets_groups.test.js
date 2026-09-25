@@ -22,6 +22,10 @@ describe('Modül 3 & 4: Varlık Grupları ve Varlıklar Testleri', () => {
         periodDays: 45,
         inspectionEnabled: true,
         inspectionPeriodDays: 180,
+        inspectionBaselineDate: '2026-10-15',
+        extMaintEnabled: true,
+        extMaintPeriodDays: 365,
+        extMaintBaselineDate: '2026-11-20',
         checklist: [
           { id: 'q1', text: 'Hidrolik yağ seviyesini kontrol et' },
           { id: 'q2', text: 'Basınç valflerini test et' }
@@ -34,6 +38,9 @@ describe('Modül 3 & 4: Varlık Grupları ve Varlıklar Testleri', () => {
     assert.strictEqual(res.data.name, groupName);
     assert.strictEqual(res.data.periodDays, 45);
     assert.strictEqual(res.data.inspectionEnabled, true);
+    assert.strictEqual(res.data.inspectionBaselineDate, '2026-10-15');
+    assert.strictEqual(res.data.extMaintEnabled, true);
+    assert.strictEqual(res.data.extMaintBaselineDate, '2026-11-20');
     assert.strictEqual(res.data.checklist.length, 2);
     createdGroupId = res.data.id;
   });
@@ -45,6 +52,8 @@ describe('Modül 3 & 4: Varlık Grupları ve Varlıklar Testleri', () => {
     const found = res.data.find(g => g.id === createdGroupId);
     assert.ok(found);
     assert.strictEqual(found.periodDays, 45);
+    assert.strictEqual(found.inspectionBaselineDate, '2026-10-15');
+    assert.strictEqual(found.extMaintBaselineDate, '2026-11-20');
   });
 
   test('Varlık grubuna bağlı yeni bir varlık oluşturulabilmeli (POST /api/assets)', async () => {

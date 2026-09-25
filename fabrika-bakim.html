@@ -478,9 +478,11 @@ async function loadDB(){
     if(g.inspectionEnabled===undefined) g.inspectionEnabled=false;
     if(g.inspectionPeriodDays===undefined) g.inspectionPeriodDays=null;
     if(g.inspectionBaselineDate===undefined) g.inspectionBaselineDate=null;
+    else if(g.inspectionBaselineDate) g.inspectionBaselineDate = String(g.inspectionBaselineDate).slice(0, 10);
     if(g.extMaintEnabled===undefined) g.extMaintEnabled=false;
     if(g.extMaintPeriodDays===undefined) g.extMaintPeriodDays=null;
     if(g.extMaintBaselineDate===undefined) g.extMaintBaselineDate=null;
+    else if(g.extMaintBaselineDate) g.extMaintBaselineDate = String(g.extMaintBaselineDate).slice(0, 10);
     g.checklist = g.checklist || [];
   });
   db.assets.forEach(a=>{
@@ -1314,8 +1316,8 @@ function renderGroups(el){
       const count = db.assets.filter(a=>a.groupId===g.id).length;
       return `<div class="panel">
         <div class="row"><h2 style="margin:0;">${esc(g.name)}</h2><span class="badge b-accent">${g.periodDays} günde bir</span>
-        ${g.inspectionEnabled?`<span class="badge b-warn">Muayene: ${g.inspectionPeriodDays} günde bir</span>`:''}
-        ${g.extMaintEnabled?`<span class="badge b-warn">Dış Bakım: ${g.extMaintPeriodDays} günde bir</span>`:''}
+        ${g.inspectionEnabled?`<span class="badge b-warn">Muayene: ${g.inspectionPeriodDays} günde bir${g.inspectionBaselineDate ? ' (İlk: ' + fmtStr(g.inspectionBaselineDate) + ')' : ''}</span>`:''}
+        ${g.extMaintEnabled?`<span class="badge b-warn">Dış Bakım: ${g.extMaintPeriodDays} günde bir${g.extMaintBaselineDate ? ' (İlk: ' + fmtStr(g.extMaintBaselineDate) + ')' : ''}</span>`:''}
         <span class="muted mono tiny">${count} varlık</span>
         <div class="spacer"></div>
         ${editable?`<button class="ghost small" onclick="openGroupForm('${g.id}')">Düzenle</button><button class="ghost small" onclick="deleteGroup('${g.id}')">Sil</button>`:''}
@@ -1335,6 +1337,8 @@ window.deleteGroup = function(id){
 window.openGroupForm = function(id){
   const g = id ? group(id) : null;
   tempChecklist = g ? g.checklist.map(q=>({...q})) : [];
+  const inspDateVal = (g && g.inspectionBaselineDate) ? String(g.inspectionBaselineDate).slice(0, 10) : '';
+  const extDateVal = (g && g.extMaintBaselineDate) ? String(g.extMaintBaselineDate).slice(0, 10) : '';
   openModal(`
     <h3>${g?'Grubu Düzenle':'Yeni Varlık Grubu'}</h3>
     <div class="grid2">
@@ -1353,7 +1357,7 @@ window.openGroupForm = function(id){
       <div id="m-inspect-period-wrap" style="margin-top:10px; ${g&&g.inspectionEnabled?'':'display:none;'}">
         <div class="grid2">
           <div class="field"><label class="f-label" for="m-inspect-period">Muayene Periyodu (gün)</label><input id="m-inspect-period" type="number" min="1" value="${g&&g.inspectionPeriodDays?g.inspectionPeriodDays:365}"></div>
-          <div class="field"><label class="f-label" for="m-inspect-baseline">Muayene Başlangıç Tarihi</label><input id="m-inspect-baseline" type="date" value="${g&&g.inspectionBaselineDate?g.inspectionBaselineDate:''}"></div>
+          <div class="field"><label class="f-label" for="m-inspect-baseline">Muayene Başlangıç Tarihi</label><input id="m-inspect-baseline" type="date" value="${inspDateVal}"></div>
         </div>
         <div class="muted tiny" style="margin-top:6px;">Bu tarih, henüz hiç muayene yapılmamış varlıklar için ilk planlama tarihini belirler.</div>
       </div>
@@ -1366,7 +1370,7 @@ window.openGroupForm = function(id){
       <div id="m-extmaint-period-wrap" style="margin-top:10px; ${g&&g.extMaintEnabled?'':'display:none;'}">
         <div class="grid2">
           <div class="field"><label class="f-label" for="m-extmaint-period">Dış Bakım Periyodu (gün)</label><input id="m-extmaint-period" type="number" min="1" value="${g&&g.extMaintPeriodDays?g.extMaintPeriodDays:365}"></div>
-          <div class="field"><label class="f-label" for="m-extmaint-baseline">Dış Bakım Başlangıç Tarihi</label><input id="m-extmaint-baseline" type="date" value="${g&&g.extMaintBaselineDate?g.extMaintBaselineDate:''}"></div>
+          <div class="field"><label class="f-label" for="m-extmaint-baseline">Dış Bakım Başlangıç Tarihi</label><input id="m-extmaint-baseline" type="date" value="${extDateVal}"></div>
         </div>
         <div class="muted tiny" style="margin-top:6px;">Bu tarih, henüz hiç dış bakımı yapılmamış varlıklar için ilk planlama tarihini belirler.</div>
       </div>
@@ -1391,10 +1395,12 @@ window.saveGroup = async function(id){
   const checklist = tempChecklist.filter(q=>q.text.trim());
   const inspectionEnabled = document.getElementById('m-inspect-enabled').checked;
   const inspectionPeriodDays = inspectionEnabled ? (parseInt(document.getElementById('m-inspect-period').value)||365) : null;
-  const inspectionBaselineDate = inspectionEnabled ? (document.getElementById('m-inspect-baseline').value || null) : null;
+  const rawInspBase = document.getElementById('m-inspect-baseline')?.value;
+  const inspectionBaselineDate = inspectionEnabled && rawInspBase ? String(rawInspBase).slice(0, 10) : null;
   const extMaintEnabled = document.getElementById('m-extmaint-enabled').checked;
   const extMaintPeriodDays = extMaintEnabled ? (parseInt(document.getElementById('m-extmaint-period').value)||365) : null;
-  const extMaintBaselineDate = extMaintEnabled ? (document.getElementById('m-extmaint-baseline').value || null) : null;
+  const rawExtBase = document.getElementById('m-extmaint-baseline')?.value;
+  const extMaintBaselineDate = extMaintEnabled && rawExtBase ? String(rawExtBase).slice(0, 10) : null;
   const data = {name, periodDays, checklist, inspectionEnabled, inspectionPeriodDays, inspectionBaselineDate, extMaintEnabled, extMaintPeriodDays, extMaintBaselineDate};
   if(id){ Object.assign(group(id), data); }
   else { db.assetGroups.push({id:uid('g'), ...data}); }

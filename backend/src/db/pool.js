@@ -1,7 +1,10 @@
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 require('dotenv').config();
+
+// PostgreSQL DATE (oid 1082) alanlarını timezone kayması ve Date nesnesine dönüşüm olmadan saf 'YYYY-MM-DD' string olarak döndür
+types.setTypeParser(1082, (val) => val);
 
 const isProduction = process.env.NODE_ENV === 'production';
 const useSSL = process.env.DATABASE_SSL === 'true' || 
