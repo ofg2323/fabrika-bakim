@@ -18,7 +18,7 @@ CREATE TABLE counters (
   kind TEXT PRIMARY KEY,
   value INT NOT NULL DEFAULT 0
 );
-INSERT INTO counters(kind,value) VALUES ('fault',0),('maint',0),('inspection',0),('extmaint',0),('project',0);
+INSERT INTO counters(kind,value) VALUES ('fault',0),('maint',0),('inspection',0),('extmaint',0),('project',0),('calibration',0);
 
 -- ================= TEDARİKÇİLER =================
 CREATE TABLE suppliers (
@@ -44,7 +44,10 @@ CREATE TABLE asset_groups (
   inspection_baseline_date DATE,
   ext_maint_enabled BOOLEAN NOT NULL DEFAULT false,
   ext_maint_period_days INT,
-  ext_maint_baseline_date DATE
+  ext_maint_baseline_date DATE,
+  calibration_enabled BOOLEAN NOT NULL DEFAULT false,
+  calibration_period_days INT,
+  calibration_baseline_date DATE
 );
 
 -- ================= VARLIKLAR =================
@@ -223,6 +226,17 @@ CREATE TABLE maintenance_used_materials (
   unit_cost NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (unit_cost >= 0)
 );
 
+CREATE TABLE maintenance_attachments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  maintenance_id UUID NOT NULL REFERENCES maintenance_records(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('image','dosya','document','link')),
+  storage_key TEXT,
+  url TEXT,
+  added_date DATE NOT NULL DEFAULT CURRENT_DATE
+);
+CREATE INDEX idx_maint_att_maint_id ON maintenance_attachments(maintenance_id);
+
 -- ================= ARIZALAR =================
 CREATE TABLE faults (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -307,6 +321,33 @@ CREATE TABLE ext_maint_certificates (
   record_id UUID NOT NULL REFERENCES ext_maint_records(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   kind TEXT NOT NULL CHECK (kind IN ('image','dosya','link')),
+  storage_key TEXT,
+  url TEXT,
+  added_date DATE NOT NULL DEFAULT CURRENT_DATE
+);
+
+-- ================= KALİBRASYON (grup bazlı, çoklu varlık kapsar) =================
+CREATE TABLE calibration_records (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tracking_no TEXT UNIQUE,
+  group_id UUID NOT NULL REFERENCES asset_groups(id),
+  contractor TEXT,
+  start_date DATE,
+  end_date DATE NOT NULL,
+  notes TEXT,
+  service_cost NUMERIC(14,2) NOT NULL DEFAULT 0,
+  completed_by UUID REFERENCES users(id)
+);
+CREATE TABLE calibration_record_assets (
+  calibration_id UUID REFERENCES calibration_records(id) ON DELETE CASCADE,
+  asset_id UUID REFERENCES assets(id) ON DELETE CASCADE,
+  PRIMARY KEY (calibration_id, asset_id)
+);
+CREATE TABLE calibration_certificates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  calibration_id UUID NOT NULL REFERENCES calibration_records(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('image','dosya','document','link')),
   storage_key TEXT,
   url TEXT,
   added_date DATE NOT NULL DEFAULT CURRENT_DATE

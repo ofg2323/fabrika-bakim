@@ -52,11 +52,11 @@ const handleUpdateSettings = async (req, res) => {
 };
 
 // PUT & POST /api/settings — Baskı şablonu ve sistem ayarlarını güncelle
-router.put('/', requireRole('Yönetici'), handleUpdateSettings);
-router.post('/', requireRole('Yönetici'), handleUpdateSettings);
+router.put('/', requireRole('Yönetici', 'Teknisyen'), handleUpdateSettings);
+router.post('/', requireRole('Yönetici', 'Teknisyen'), handleUpdateSettings);
 
-// POST /api/settings/logo — Firma logosu yükleme (Yalnızca Yönetici)
-router.post('/logo', requireRole('Yönetici'), upload.single('logo'), async (req, res) => {
+// POST /api/settings/logo — Firma logosu yükleme
+router.post('/logo', requireRole('Yönetici', 'Teknisyen'), upload.single('logo'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'Yüklenecek bir logo dosyası seçilmedi.' });
   }
@@ -79,7 +79,7 @@ router.post('/logo', requireRole('Yönetici'), upload.single('logo'), async (req
 });
 
 // DELETE /api/settings/logo — Firma logosunu kaldırma
-router.delete('/logo', requireRole('Yönetici'), async (req, res) => {
+router.delete('/logo', requireRole('Yönetici', 'Teknisyen'), async (req, res) => {
   const { rows: existing } = await pool.query('SELECT logo_storage_key FROM print_template WHERE id = 1');
   if (existing[0] && existing[0].logo_storage_key) {
     safeUnlink(existing[0].logo_storage_key);

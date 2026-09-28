@@ -19,7 +19,7 @@ router.param('id', (req, res, next, id) => {
 
 // GET /api/users/assignable — Görev ve iş atamaları için yalın kullanıcı listesi (şifre vb. bayrakları içermez)
 router.get('/assignable', async (req, res) => {
-  const { rows } = await pool.query('SELECT id, name, role FROM users ORDER BY name ASC');
+  const { rows } = await pool.query("SELECT id, name, role FROM users WHERE role IN ('Yönetici', 'Bakımcı', 'Teknisyen') ORDER BY name ASC");
   res.json(rows);
 });
 
@@ -89,17 +89,11 @@ router.put('/:id', async (req, res) => {
       });
     }
 
-    // Yöneticinin kendini sistemdeki tek yönetici iken başka role düşürmesini engelle
+    // Yöneticinin kendi rolünü düşürmesini engelle
     if (isSelf && role !== 'Yönetici') {
-      const { rows: adminCount } = await pool.query(
-        "SELECT COUNT(*)::int AS count FROM users WHERE role = 'Yönetici' AND id != $1",
-        [id]
-      );
-      if (adminCount[0]?.count === 0) {
-        return res.status(400).json({
-          error: 'Sistemdeki tek yönetici sizsiniz. Kendinizi yönetici rolünden çıkaramazsınız.'
-        });
-      }
+      return res.status(400).json({
+        error: 'Yönetici kendi rolünü değiştiremez veya düşüremez.'
+      });
     }
 
     fields.push(`role=$${i++}`);

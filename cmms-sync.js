@@ -58,8 +58,9 @@
   // Oturum süresi dolduğunda
   window.onAuthExpired = function() {
     currentUser = null;
-    window.toast.error('Oturum süreniz doldu. Lütfen tekrar giriş yapın.');
-    render();
+    API.logout();
+    if (window.toast) window.toast.error('Oturum süreniz doldu. Lütfen tekrar giriş yapın.');
+    if (typeof renderLogin === 'function') renderLogin();
   };
 
   // 1. Veritabanını Backend API üzerinden yükleme
@@ -81,7 +82,8 @@
         inspections,
         extMaints,
         projects,
-        settings
+        settings,
+        calibrations
       ] = await Promise.all([
         API.getUsers(),
         API.getAssetGroups(),
@@ -96,16 +98,17 @@
         API.getInspections(),
         API.getExtMaintenance(),
         API.getProjects(),
-        API.getSettings()
+        API.getSettings(),
+        API.getCalibrations().catch(() => [])
       ]);
 
       if (!window.db) {
         window.db = {
           users: [], assetGroups: [], assets: [], materials: [],
           maintenanceRecords: [], faults: [], inspectionRecords: [],
-          extMaintRecords: [], purchases: [], needsList: [],
+          extMaintRecords: [], calibrationRecords: [], purchases: [], needsList: [],
           stockMovements: [], suppliers: [], projects: [],
-          counters: { fault: 0, maint: 0, inspection: 0, extmaint: 0, project: 0 },
+          counters: { fault: 0, maint: 0, inspection: 0, extmaint: 0, calibration: 0, project: 0 },
           printTemplate: {}
         };
       }
@@ -119,6 +122,7 @@
         ...g,
         inspectionBaselineDate: g.inspectionBaselineDate ? String(g.inspectionBaselineDate).slice(0, 10) : null,
         extMaintBaselineDate: g.extMaintBaselineDate ? String(g.extMaintBaselineDate).slice(0, 10) : null,
+        calibrationBaselineDate: g.calibrationBaselineDate ? String(g.calibrationBaselineDate).slice(0, 10) : null,
       }));
       targetDb.assets = (assets || []).filter(a => a && isUuid(a.id));
       targetDb.suppliers = (suppliers || []).filter(s => s && isUuid(s.id));
@@ -130,27 +134,30 @@
       targetDb.faults = faults || [];
       targetDb.inspectionRecords = inspections || [];
       targetDb.extMaintRecords = extMaints || [];
+      targetDb.calibrationRecords = calibrations || [];
       targetDb.projects = projects || [];
       targetDb.printTemplate = typeof migratePrintTemplate === 'function' ? migratePrintTemplate(settings) : (settings || {});
-      targetDb.counters = targetDb.counters || { fault: 0, maint: 0, inspection: 0, extmaint: 0, project: 0 };
+      targetDb.counters = targetDb.counters || { fault: 0, maint: 0, inspection: 0, extmaint: 0, calibration: 0, project: 0 };
 
       // Sayaçları senkronize et
       syncCounters();
 
     } catch (err) {
       console.error('Veri yükleme hatası:', err);
-      if (err.message && err.message.includes('401')) {
+      const isAuthError = !API.getToken() || (err.message && (err.message.includes('401') || err.message.includes('Oturum') || err.message.includes('token') || err.message.includes('yetki')));
+      if (isAuthError) {
         onAuthExpired();
       } else {
         window.toast.error('Veriler sunucudan alınamadı: ' + err.message);
       }
+      throw err;
     }
   };
 
   function syncCounters() {
     const targetDb = window.db;
     if (!targetDb) return;
-    targetDb.counters = targetDb.counters || { fault: 0, maint: 0, inspection: 0, extmaint: 0, project: 0 };
+    targetDb.counters = targetDb.counters || { fault: 0, maint: 0, inspection: 0, extmaint: 0, calibration: 0, project: 0 };
     if (targetDb.faults && targetDb.faults.length) {
       const fNums = targetDb.faults.map(f => parseInt((f.trackingNo || '').replace(/\D/g, ''), 10)).filter(n => !isNaN(n));
       if (fNums.length) targetDb.counters.fault = Math.max(targetDb.counters.fault || 0, ...fNums);
@@ -166,6 +173,10 @@
     if (targetDb.extMaintRecords && targetDb.extMaintRecords.length) {
       const eNums = targetDb.extMaintRecords.map(e => parseInt((e.trackingNo || '').replace(/\D/g, ''), 10)).filter(n => !isNaN(n));
       if (eNums.length) targetDb.counters.extmaint = Math.max(targetDb.counters.extmaint || 0, ...eNums);
+    }
+    if (targetDb.calibrationRecords && targetDb.calibrationRecords.length) {
+      const cNums = targetDb.calibrationRecords.map(c => parseInt((c.trackingNo || '').replace(/\D/g, ''), 10)).filter(n => !isNaN(n));
+      if (cNums.length) targetDb.counters.calibration = Math.max(targetDb.counters.calibration || 0, ...cNums);
     }
     if (targetDb.projects && targetDb.projects.length) {
       const pNums = targetDb.projects.map(p => parseInt((p.trackingNo || '').replace(/\D/g, ''), 10)).filter(n => !isNaN(n));
@@ -194,6 +205,7 @@
           ...g,
           inspectionBaselineDate: g.inspectionBaselineDate ? String(g.inspectionBaselineDate).slice(0, 10) : null,
           extMaintBaselineDate: g.extMaintBaselineDate ? String(g.extMaintBaselineDate).slice(0, 10) : null,
+          calibrationBaselineDate: g.calibrationBaselineDate ? String(g.calibrationBaselineDate).slice(0, 10) : null,
         }));
       }
     } catch (e) { console.error('reloadAssetGroups error:', e); }
@@ -208,6 +220,7 @@
           ...g,
           inspectionBaselineDate: g.inspectionBaselineDate ? String(g.inspectionBaselineDate).slice(0, 10) : null,
           extMaintBaselineDate: g.extMaintBaselineDate ? String(g.extMaintBaselineDate).slice(0, 10) : null,
+          calibrationBaselineDate: g.calibrationBaselineDate ? String(g.calibrationBaselineDate).slice(0, 10) : null,
         }));
       }
     } catch (e) { console.error('reloadAssets error:', e); }
@@ -306,12 +319,35 @@
     } catch (e) { console.error('reloadExtMaintenance error:', e); }
   };
 
-  window.reloadProjects = async function() {
+  window.reloadCalibrations = async function() {
+    try {
+      const calibrations = await API.getCalibrations();
+      if (window.db) {
+        window.db.calibrationRecords = calibrations || [];
+        syncCounters();
+      }
+    } catch (e) { console.error('reloadCalibrations error:', e); }
+  };
+
+  window.reloadProjects = async function(specificProjectId) {
     try {
       const projects = await API.getProjects();
       if (window.db) {
         window.db.projects = projects || [];
         syncCounters();
+      }
+      const targetId = specificProjectId || window.currentProjectId;
+      if (targetId && window.db && window.db.projects) {
+        try {
+          const detail = await API.getProject(targetId);
+          if (detail) {
+            const idx = window.db.projects.findIndex(x => x.id === targetId);
+            if (idx !== -1) window.db.projects[idx] = detail;
+            else window.db.projects.push(detail);
+          }
+        } catch (detailErr) {
+          console.warn('reloadProjects detail fetch error for', targetId, detailErr);
+        }
       }
     } catch (e) { console.error('reloadProjects error:', e); }
   };
@@ -332,20 +368,14 @@
         render();
         return;
       } catch (e) {
-        console.warn('Kayıtlı oturum geçersiz, giriş ekranına yönlendiriliyor.');
+        console.warn('Kayıtlı oturum geçersiz, giriş ekranına yönlendiriliyor:', e);
         API.logout();
-      }
-    }
-
-    try {
-      const users = await API.getAuthUsers();
-      if (!users || users.length === 0) {
-        renderFirstUserScreen();
-      } else {
+        currentUser = null;
         renderLogin();
+        return;
       }
-    } catch (err) {
-      console.error('Kullanıcı listesi alınamadı:', err);
+    } else {
+      currentUser = null;
       renderLogin();
     }
   };
@@ -581,6 +611,20 @@
     const extDays = extEnabled ? (parseInt(document.getElementById('m-extmaint-period')?.value, 10) || 365) : null;
     const extRaw = document.getElementById('m-extmaint-baseline')?.value;
     const extBase = (extEnabled && extRaw) ? String(extRaw).trim().slice(0, 10) : null;
+    const calibEnabled = document.getElementById('m-calib-enabled')?.checked || false;
+    const calibDays = calibEnabled ? (parseInt(document.getElementById('m-calib-period')?.value, 10) || 365) : null;
+    const calibRaw = document.getElementById('m-calib-baseline')?.value;
+    const calibBase = (calibEnabled && calibRaw) ? String(calibRaw).trim().slice(0, 10) : null;
+
+    // DOM'daki aktif input değerlerini senkronize et (onchange blur gecikmesini önlemek için)
+    const domInputs = document.querySelectorAll('#checklistWrap .qtext');
+    if (domInputs.length && window.tempChecklist) {
+      domInputs.forEach((inp, idx) => {
+        if (window.tempChecklist[idx]) {
+          window.tempChecklist[idx].text = inp.value.trim();
+        }
+      });
+    }
 
     const payload = {
       name,
@@ -591,7 +635,10 @@
       extMaintEnabled: extEnabled,
       extMaintPeriodDays: extDays,
       extMaintBaselineDate: extBase,
-      checklist: (tempChecklist || []).filter(q => q.text && q.text.trim()).map(q => ({ id: q.id, text: q.text.trim() })),
+      calibrationEnabled: calibEnabled,
+      calibrationPeriodDays: calibDays,
+      calibrationBaselineDate: calibBase,
+      checklist: (window.tempChecklist || []).filter(q => q && q.text && q.text.trim()).map(q => ({ id: q.id || uid('q'), text: q.text.trim() })),
     };
 
     try {
@@ -687,6 +734,19 @@
     } catch (err) {
       window.toast.error('Stok düzeltmesi başarısız: ' + err.message);
     }
+  };
+
+  window.deleteStockMovement = function(id) {
+    confirmDelete('Bu stok hareketini silmek istediğinize emin misiniz? (Stok miktarı otomatik geri alınacaktır)', async () => {
+      try {
+        await API.deleteStockMovement(id);
+        await reloadMaterials();
+        renderTab();
+        window.toast.success('Stok hareketi silindi ve stok güncellendi.');
+      } catch (err) {
+        window.toast.error('Stok hareketi silinemedi: ' + err.message);
+      }
+    });
   };
 
   // 7. İhtiyaç Listesi (Needs List) Entegrasyonu
@@ -851,7 +911,8 @@
     const type = document.getElementById('m-mainttype')?.value || 'Periyodik';
     const startDate = document.getElementById('m-startdate')?.value || todayStr();
     const endDate = document.getElementById('m-enddate')?.value || todayStr();
-    const notes = (document.getElementById('m-maintnotes')?.value || '').trim();
+    const notes = (document.getElementById('m-maintnote')?.value || document.getElementById('m-maintnotes')?.value || '').trim();
+    const extraCost = parseFloat(document.getElementById('m-maintextracost')?.value) || 0;
 
     const payload = {
       assetId,
@@ -859,16 +920,40 @@
       startDate,
       endDate,
       notes,
-      checklist: tempChecklistResults || [],
-      usedMaterials: (tempUsedMaterials || []).filter(m => m.qty > 0),
+      extraCost,
+      checklist: window.tempChecklistResults || [],
+      usedMaterials: (window.tempUsedMaterials || []).filter(m => m.qty > 0),
     };
 
     try {
+      let recId = recordId;
       if (recordId) {
         await API.updateMaintenanceRecord(recordId, payload);
       } else {
-        await API.createMaintenanceRecord(payload);
+        const created = await API.createMaintenanceRecord(payload);
+        recId = created.id;
       }
+
+      // Silinecek ekler
+      if (window.maintAttachmentsToDelete && window.maintAttachmentsToDelete.length > 0) {
+        for (const attId of window.maintAttachmentsToDelete) {
+          try { await API.deleteMaintenanceAttachment(recId, attId); } catch (e) {}
+        }
+      }
+
+      // Yeni ekler
+      if (window.tempMaintAttachments && window.tempMaintAttachments.length > 0) {
+        for (const a of window.tempMaintAttachments) {
+          if (a.isNew) {
+            if (a.kind === 'link') {
+              await API.uploadMaintenanceAttachment(recId, null, { name: a.name, kind: 'link', url: a.url });
+            } else if (a.file) {
+              await API.uploadMaintenanceAttachment(recId, a.file, { name: a.name, kind: a.kind });
+            }
+          }
+        }
+      }
+
       await reloadMaintenance();
       closeModal();
       renderTab();
@@ -1143,7 +1228,82 @@
     });
   };
 
-  // 14. Projeler (Projects) Entegrasyonu
+  // 14. Kalibrasyon (Calibrations) Entegrasyonu
+  window.saveCalibrationForm = async function(recordId) {
+    const groupId = document.getElementById('m-calibgroup')?.value;
+    const assetIds = [...(window.tempCalibrationAssetIds || [])];
+    if (!assetIds.length) { window.toast.error('En az bir varlık seçmelisiniz.'); return; }
+
+    const contractor = (document.getElementById('m-calibcontractor')?.value || '').trim();
+    const startDate = document.getElementById('m-calibstart')?.value || todayStr();
+    const endDate = document.getElementById('m-calibend')?.value || todayStr();
+    const notes = (document.getElementById('m-calibnote')?.value || '').trim();
+    const serviceCost = parseFloat(document.getElementById('m-calibcost')?.value) || 0;
+
+    const payload = {
+      groupId,
+      contractor,
+      startDate,
+      endDate,
+      notes,
+      serviceCost,
+      assetIds,
+    };
+
+    try {
+      let recId = recordId;
+      if (recordId) {
+        await API.updateCalibration(recordId, payload);
+      } else {
+        const created = await API.createCalibration(payload);
+        recId = created.id;
+      }
+
+      // Silinecek belgeler
+      if (window.calibCertsToDelete && window.calibCertsToDelete.length > 0) {
+        for (const certId of window.calibCertsToDelete) {
+          try { await API.deleteCalibrationCertificate(recId, certId); } catch (e) {}
+        }
+      }
+
+      // Yeni belgeler
+      if (window.tempCalibrationCertificates && window.tempCalibrationCertificates.length > 0) {
+        for (const c of window.tempCalibrationCertificates) {
+          if (c.isNew) {
+            if (c.kind === 'link') {
+              await API.uploadCalibrationCertificate(recId, null, c.name, 'link', c.url);
+            } else if (c.file) {
+              await API.uploadCalibrationCertificate(recId, c.file, c.name, c.kind);
+            }
+          }
+        }
+      }
+
+      await reloadCalibrations();
+      await reloadAssets();
+      closeModal();
+      renderTab();
+      window.toast.success(recordId ? 'Kalibrasyon güncellendi.' : 'Kalibrasyon kaydı oluşturuldu.');
+    } catch (err) {
+      window.toast.error('Kalibrasyon kaydedilemedi: ' + err.message);
+    }
+  };
+
+  window.deleteCalibration = function(id) {
+    confirmDelete('Bu kalibrasyon kaydını silmek istediğinize emin misiniz?', async () => {
+      try {
+        await API.deleteCalibration(id);
+        await reloadCalibrations();
+        await reloadAssets();
+        renderTab();
+        window.toast.success('Kalibrasyon kaydı silindi.');
+      } catch (err) {
+        window.toast.error('Silme başarısız: ' + err.message);
+      }
+    });
+  };
+
+  // 15. Projeler (Projects) Entegrasyonu
   window.saveProjectForm = async function(id) {
     const nameEl = document.getElementById('m-projname');
     if (!nameEl) return;
@@ -1190,13 +1350,37 @@
       try {
         await API.deleteProject(id);
         await reloadProjects();
-        currentProjectId = null;
+        if (typeof currentProjectId !== 'undefined') currentProjectId = null;
+        window.currentProjectId = null;
         renderTab();
         window.toast.success('Proje silindi.');
       } catch (err) {
         window.toast.error('Silme başarısız: ' + err.message);
       }
     });
+  };
+
+  window.openProjectDetail = async function(id) {
+    if (typeof currentProjectId !== 'undefined') currentProjectId = id;
+    window.currentProjectId = id;
+    if (typeof projectDetailTab !== 'undefined') projectDetailTab = 'genel';
+    window.projectDetailTab = 'genel';
+    if (typeof renderTab === 'function') renderTab();
+    try {
+      const detail = await API.getProject(id);
+      if (detail && window.db && window.db.projects) {
+        const idx = window.db.projects.findIndex(x => x.id === id);
+        if (idx !== -1) window.db.projects[idx] = detail;
+        else window.db.projects.push(detail);
+        const active = (typeof currentProjectId !== 'undefined' ? currentProjectId : null) || window.currentProjectId;
+        if (active === id && typeof renderTab === 'function') {
+          renderTab();
+        }
+      }
+    } catch (e) {
+      console.error('openProjectDetail load error:', e);
+      if (window.toast) window.toast.error('Proje detayları yüklenemedi: ' + e.message);
+    }
   };
 
   window.saveTaskForm = async function(projectId, taskId) {
@@ -1226,7 +1410,7 @@
       } else {
         await API.createProjectTask(projectId, payload);
       }
-      await reloadProjects();
+      await reloadProjects(projectId);
       closeModal();
       renderTab();
       window.toast.success(taskId ? 'Görev güncellendi.' : 'Görev eklendi.');
@@ -1235,11 +1419,22 @@
     }
   };
 
+  window.updateTaskStatus = async function(projectId, taskId, status) {
+    try {
+      await API.updateProjectTask(projectId, taskId, { status });
+      await reloadProjects(projectId);
+      renderTab();
+      window.toast.success('Görev durumu güncellendi.');
+    } catch (err) {
+      window.toast.error('Durum güncellenemedi: ' + err.message);
+    }
+  };
+
   window.deleteTask = function(projectId, taskId) {
     confirmDelete('Bu görevi silmek istediğinize emin misiniz?', async () => {
       try {
         await API.deleteProjectTask(projectId, taskId);
-        await reloadProjects();
+        await reloadProjects(projectId);
         renderTab();
         window.toast.success('Görev silindi.');
       } catch (err) {
@@ -1254,17 +1449,18 @@
     const supplierName = (document.getElementById('m-quotesupname')?.value || '').trim();
     const date = document.getElementById('m-quotedate')?.value || todayStr();
     const validUntil = document.getElementById('m-quotevalid')?.value || null;
+    const status = document.getElementById('m-quotestatus')?.value || 'Beklemede';
     const note = (document.getElementById('m-quotenote')?.value || '').trim();
     const fileInput = document.getElementById('m-quotefile');
     const file = fileInput && fileInput.files ? fileInput.files[0] : null;
 
     try {
       if (quoteId) {
-        await API.updateProjectQuote(projectId, quoteId, { amount, supplierId, supplierName, date, validUntil, note });
+        await API.updateProjectQuote(projectId, quoteId, { amount, supplierId, supplierName, date, validUntil, status, note }, file);
       } else {
-        await API.createProjectQuote(projectId, { amount, supplierId, supplierName, date, validUntil, note }, file);
+        await API.createProjectQuote(projectId, { amount, supplierId, supplierName, date, validUntil, status, note }, file);
       }
-      await reloadProjects();
+      await reloadProjects(projectId);
       closeModal();
       renderTab();
       window.toast.success(quoteId ? 'Teklif güncellendi.' : 'Teklif eklendi.');
@@ -1277,7 +1473,7 @@
     confirmDelete('Bu teklifi silmek istediğinize emin misiniz?', async () => {
       try {
         await API.deleteProjectQuote(projectId, quoteId);
-        await reloadProjects();
+        await reloadProjects(projectId);
         renderTab();
         window.toast.success('Teklif silindi.');
       } catch (err) {
@@ -1286,28 +1482,43 @@
     });
   };
 
-  window.saveProgressLog = async function(projectId) {
-    const note = (document.getElementById('m-lognote')?.value || '').trim();
+  window.updateProjectBudget = async function(projectId) {
+    const amount = parseFloat(document.getElementById('m-budgetamount')?.value) || 0;
+    const date = document.getElementById('m-budgetdate')?.value || todayStr();
+    const note = (document.getElementById('m-budgetnote')?.value || '').trim();
+
+    try {
+      await API.addProjectBudget(projectId, { amount, date, note });
+      await reloadProjects(projectId);
+      renderTab();
+      window.toast.success('Bütçe güncellendi.');
+    } catch (err) {
+      window.toast.error('Bütçe güncellenemedi: ' + err.message);
+    }
+  };
+
+  window.addProgressLog = async function(projectId) {
+    const note = (document.getElementById('m-proglognote')?.value || document.getElementById('m-lognote')?.value || '').trim();
     if (!note) { window.toast.error('İlerleme notu zorunludur.'); return; }
 
-    const date = document.getElementById('m-logdate')?.value || todayStr();
+    const date = document.getElementById('m-proglogdate')?.value || document.getElementById('m-logdate')?.value || todayStr();
 
     try {
       await API.addProjectProgressLog(projectId, { date, note });
-      await reloadProjects();
-      closeModal();
+      await reloadProjects(projectId);
       renderTab();
       window.toast.success('İlerleme notu eklendi.');
     } catch (err) {
       window.toast.error('Not eklenemedi: ' + err.message);
     }
   };
+  window.saveProgressLog = window.addProgressLog;
 
   window.deleteProgressLog = function(projectId, logId) {
     confirmDelete('Bu ilerleme notunu silmek istediğinize emin misiniz?', async () => {
       try {
         await API.deleteProjectProgressLog(projectId, logId);
-        await reloadProjects();
+        await reloadProjects(projectId);
         renderTab();
         window.toast.success('İlerleme notu silindi.');
       } catch (err) {
@@ -1378,6 +1589,17 @@
     if (pageEl) t.pageSize = pageEl.value;
     const orientEl = document.getElementById('s-orient');
     if (orientEl) t.orientation = orientEl.value;
+
+    if (window.designerFormTab && t[window.designerFormTab]) {
+      const titleEl = document.getElementById('s-formtitle');
+      if (titleEl) t[window.designerFormTab].formTitle = titleEl.value.trim();
+      const noEl = document.getElementById('s-formno');
+      if (noEl) t[window.designerFormTab].formNo = noEl.value.trim();
+      const revNoEl = document.getElementById('s-revno');
+      if (revNoEl) t[window.designerFormTab].revisionNo = revNoEl.value.trim();
+      const revDateEl = document.getElementById('s-revdate');
+      if (revDateEl) t[window.designerFormTab].revisionDate = revDateEl.value.trim();
+    }
 
     const payload = {
       companyName: t.companyName,
@@ -1584,6 +1806,88 @@
         </div>`;
       }
       window.toast.success(`Malzeme aktarımı tamamlandı: ${added} yeni eklendi, ${updated} güncellendi.`);
+    };
+    reader.readAsText(file, 'UTF-8');
+  };
+
+  window.downloadFaultTemplate = function() {
+    const headers = ['Varlık Kodu veya Adı', 'Arıza Başlığı', 'Açıklama', 'Öncelik', 'Durum', 'Bildirim Tarihi (YYYY-AA-GG)', 'Çözüm Tarihi (YYYY-AA-GG)', 'Çözüm Notu', 'Dış Servis Maliyeti'];
+    const example = ['VG-001', 'Rulman Aşırı Isınma', 'Motor rulmanında yüksek sıcaklık ve ses tespit edildi.', 'Yüksek', 'Çözüldü', '2025-02-10', '2025-02-11', 'Rulman değiştirildi ve yağlama yapıldı.', '1500'];
+    if (typeof exportCSV === 'function') {
+      exportCSV('ariza-sablonu.csv', headers, [example]);
+    }
+  };
+
+  window.importFaultsFile = async function(inputEl) {
+    const file = inputEl && inputEl.files && inputEl.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async function() {
+      const rows = typeof parseCSV === 'function' ? parseCSV(String(reader.result)) : [];
+      if (rows.length < 2) {
+        window.toast.error('Dosyada veri satırı bulunamadı.');
+        inputEl.value = '';
+        return;
+      }
+      const dataRows = rows.slice(1);
+      const items = [];
+      const errors = [];
+      window.toast.info('Arıza kayıtları sunucuya aktarılıyor, lütfen bekleyin...');
+
+      for (let idx = 0; idx < dataRows.length; idx++) {
+        const cols = dataRows[idx].map(c => (c || '').trim());
+        const [assetRef, title, description, priority, status, repDate, resDate, resNotes, cost] = cols;
+        if (!title) { errors.push(`Satır ${idx + 2}: arıza başlığı boş, atlandı.`); continue; }
+
+        let a = null;
+        if (assetRef && window.db && window.db.assets) {
+          a = window.db.assets.find(x => (x.assetCode || '').toLowerCase() === assetRef.toLowerCase() || (x.name || '').toLowerCase() === assetRef.toLowerCase());
+        }
+        const priorityVal = ['Düşük', 'Orta', 'Yüksek', 'Kritik'].includes(priority) ? priority : 'Orta';
+        const statusVal = ['Açık', 'İnceleniyor', 'Çözüldü', 'İptal'].includes(status) ? status : (resDate ? 'Çözüldü' : 'Açık');
+        const repDateVal = /^\d{4}-\d{2}-\d{2}$/.test(repDate || '') ? repDate : todayStr();
+        const resDateVal = /^\d{4}-\d{2}-\d{2}$/.test(resDate || '') ? resDate : (statusVal === 'Çözüldü' ? todayStr() : null);
+        const costVal = parseFloat(cost) || 0;
+
+        items.push({
+          title,
+          description: description || '',
+          assetId: a ? a.id : null,
+          priority: priorityVal,
+          status: statusVal,
+          reportedDate: repDateVal,
+          resolvedDate: resDateVal,
+          resolutionNotes: resNotes || '',
+          cost: costVal
+        });
+      }
+
+      if (!items.length) {
+        window.toast.error('Aktarılacak geçerli arıza kaydı bulunamadı.');
+        inputEl.value = '';
+        return;
+      }
+
+      let added = 0;
+      try {
+        const res = await API.bulkCreateFaults(items);
+        added = res.created || 0;
+        await reloadFaults();
+        window.toast.success(`${added} arıza kaydı başarıyla aktarıldı.`);
+      } catch (err) {
+        errors.push('Toplu yükleme hatası: ' + err.message);
+        window.toast.error('Arıza kayıtları aktarılamadı: ' + err.message);
+      }
+
+      inputEl.value = '';
+      if (typeof renderTab === 'function') renderTab();
+      const el = document.getElementById('faultImportResult');
+      if (el) {
+        el.innerHTML = `<div class="panel" style="margin-top:10px; background:#fafbfa;">
+          <div style="font-weight:700; margin-bottom:6px;">${added} arıza kaydı aktarıldı.</div>
+          ${errors.length ? `<div class="muted tiny">${errors.map(e => esc(e)).join('<br>')}</div>` : ''}
+        </div>`;
+      }
     };
     reader.readAsText(file, 'UTF-8');
   };

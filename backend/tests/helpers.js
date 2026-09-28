@@ -39,24 +39,36 @@ async function getAdminToken() {
   await ensureServerRunning();
   if (cachedToken) return { token: cachedToken, admin: cachedAdmin };
 
-  // Kullanıcıları kontrol et
-  const { rows } = await pool.query("SELECT id, name, role FROM users WHERE role = 'Yönetici' LIMIT 1");
-  let adminId;
+  // Dedicated test yöneticisini bul veya oluştur (gerçek kullanıcı şifrelerine asla dokunma)
+  const { rows } = await pool.query("SELECT id, name, role FROM users WHERE name = 'Test Yöneticisi' AND role = 'Yönetici' LIMIT 1");
 
-  if (rows.length === 0) {
-    // İlk admin oluştur
-    const res = await fetch(`${API_BASE}/api/auth/first-admin`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Test Yöneticisi', password: 'test-password-123' }),
-    });
-    const data = await res.json();
-    cachedToken = data.token;
-    cachedAdmin = data.user;
-    return { token: cachedToken, admin: cachedAdmin };
-  } else {
-    adminId = rows[0].id;
+  if (rows.length > 0) {
     cachedAdmin = rows[0];
+    const bcrypt = require('bcryptjs');
+    const hash = await bcrypt.hash('test-password-123', 10);
+    await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, cachedAdmin.id]);
+  } else {
+    // İlk admin kontrolü: eğer veritabanında hiç yönetici yoksa first-admin çağrısı yap
+    const { rows: allAdmins } = await pool.query("SELECT id FROM users WHERE role = 'Yönetici' LIMIT 1");
+    if (allAdmins.length === 0) {
+      const res = await fetch(`${API_BASE}/api/auth/first-admin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Test Yöneticisi', password: 'test-password-123' }),
+      });
+      const data = await res.json();
+      cachedToken = data.token;
+      cachedAdmin = data.user;
+      return { token: cachedToken, admin: cachedAdmin };
+    } else {
+      const bcrypt = require('bcryptjs');
+      const hash = await bcrypt.hash('test-password-123', 10);
+      const { rows: ins } = await pool.query(
+        "INSERT INTO users (name, role, password_hash) VALUES ('Test Yöneticisi', 'Yönetici', $1) RETURNING id, name, role",
+        [hash]
+      );
+      cachedAdmin = ins[0];
+    }
   }
 
   const jwt = require('jsonwebtoken');

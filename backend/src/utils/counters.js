@@ -6,6 +6,7 @@ const PREFIX_MAP = {
   inspection: 'C',
   extmaint: 'D',
   project: 'P',
+  calibration: 'K',
 };
 
 /**

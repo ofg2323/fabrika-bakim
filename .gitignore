@@ -6,3 +6,5 @@ node_modules
 .env
 tools/
 *.exe
+backend/uploads/*
+!backend/uploads/.gitkeep

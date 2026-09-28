@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../../db/pool');
 const { requireAuth, requireRole } = require('../../middleware/auth');
+const { upload, safeUnlink } = require('../../middleware/upload');
 const { getNextTrackingNo } = require('../../utils/counters');
 const { toCamelMaintenance, isUuid } = require('../../utils/formatters');
 const { parsePagination, setPaginationHeaders } = require('../../utils/pagination');
@@ -113,16 +114,24 @@ router.get('/:id', async (req, res) => {
   if (!rows[0]) return res.status(404).json({ error: 'Bakım kaydı bulunamadı.' });
 
   // Kullanılan malzemeleri detaylarıyla çek
-  const { rows: usedMaterials } = await pool.query(`
-    SELECT mum.id, mum.material_id, m.name AS material_name, m.unit AS material_unit, mum.qty, mum.unit_cost, (mum.qty * mum.unit_cost) AS total_cost
-    FROM maintenance_used_materials mum
-    JOIN materials m ON m.id = mum.material_id
-    WHERE mum.record_id = $1
-    ORDER BY m.name ASC
-  `, [req.params.id]);
+  const [usedMatsRes, attsRes] = await Promise.all([
+    pool.query(`
+      SELECT mum.id, mum.material_id, m.name AS material_name, m.unit AS material_unit, mum.qty, mum.unit_cost, (mum.qty * mum.unit_cost) AS total_cost
+      FROM maintenance_used_materials mum
+      JOIN materials m ON m.id = mum.material_id
+      WHERE mum.record_id = $1
+      ORDER BY m.name ASC
+    `, [req.params.id]),
+    pool.query(`
+      SELECT id, name, kind, storage_key, url, added_date
+      FROM maintenance_attachments
+      WHERE maintenance_id = $1
+      ORDER BY added_date DESC
+    `, [req.params.id]),
+  ]);
 
   const formatted = toCamelMaintenance(rows[0]);
-  formatted.usedMaterials = usedMaterials.map(m => ({
+  formatted.usedMaterials = usedMatsRes.rows.map(m => ({
     id: m.id,
     materialId: m.material_id,
     materialName: m.material_name,
@@ -130,6 +139,14 @@ router.get('/:id', async (req, res) => {
     qty: parseFloat(m.qty) || 0,
     unitCost: parseFloat(m.unit_cost) || 0,
     totalCost: parseFloat(m.total_cost) || 0,
+  }));
+  formatted.attachments = attsRes.rows.map(a => ({
+    id: a.id,
+    name: a.name,
+    kind: a.kind,
+    storageKey: a.storage_key,
+    url: a.url,
+    addedDate: a.added_date,
   }));
 
   res.json(formatted);
@@ -309,7 +326,13 @@ router.delete('/:id', requireRole('Yönetici'), async (req, res) => {
       );
     }
 
-    // Bakım kaydını sil (ON DELETE CASCADE ile used_materials otomatik silinir)
+    // Varsa yüklenmiş ek belgeleri temizle
+    const { rows: attRows } = await client.query('SELECT storage_key FROM maintenance_attachments WHERE maintenance_id = $1 AND storage_key IS NOT NULL', [rec.id]);
+    for (const a of attRows) {
+      safeUnlink(a.storage_key);
+    }
+
+    // Bakım kaydını sil (ON DELETE CASCADE ile used_materials ve attachments otomatik silinir)
     await client.query('DELETE FROM maintenance_records WHERE id = $1', [rec.id]);
 
     await logAudit(client, {
@@ -330,6 +353,54 @@ router.delete('/:id', requireRole('Yönetici'), async (req, res) => {
   } finally {
     client.release();
   }
+});
+
+// POST /api/maintenance/:id/attachments — Bakıma dosya, resim veya link ekle
+router.post('/:id/attachments', requireRole('Yönetici', 'Teknisyen'), upload.single('file'), async (req, res) => {
+  const { name, kind, url } = req.body;
+  const isLink = kind === 'link';
+
+  if (!isLink && !req.file) {
+    return res.status(400).json({ error: 'Yüklenecek bir dosya seçilmedi veya geçersiz dosya biçimi.' });
+  }
+
+  const attName = (name && name.trim()) || (req.file ? req.file.originalname : 'Bakım Belgesi');
+  const attKind = isLink ? 'link' : (req.file.mimetype.startsWith('image/') ? 'image' : 'document');
+  const storageKey = req.file ? req.file.filename : null;
+  const linkUrl = isLink ? (url ? url.trim() : null) : null;
+
+  const { rows } = await pool.query(
+    `INSERT INTO maintenance_attachments (maintenance_id, name, kind, storage_key, url)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING *`,
+    [req.params.id, attName, attKind, storageKey, linkUrl]
+  );
+
+  res.status(201).json({
+    id: rows[0].id,
+    name: rows[0].name,
+    kind: rows[0].kind,
+    storageKey: rows[0].storage_key,
+    url: rows[0].url,
+    addedDate: rows[0].added_date,
+  });
+});
+
+// DELETE /api/maintenance/:id/attachments/:attId — Bakım ekini sil
+router.delete('/:id/attachments/:attId', requireRole('Yönetici', 'Teknisyen'), async (req, res) => {
+  const { rows } = await pool.query(
+    'SELECT storage_key FROM maintenance_attachments WHERE id = $1 AND maintenance_id = $2',
+    [req.params.attId, req.params.id]
+  );
+
+  if (!rows[0]) return res.status(404).json({ error: 'Ek bulunamadı.' });
+
+  if (rows[0].storage_key) {
+    safeUnlink(rows[0].storage_key);
+  }
+
+  await pool.query('DELETE FROM maintenance_attachments WHERE id = $1', [req.params.attId]);
+  res.status(204).end();
 });
 
 module.exports = router;

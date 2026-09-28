@@ -41,27 +41,34 @@
       else localStorage.removeItem('cmms_user');
     },
 
+    _refreshPromise: null,
     async refreshTokens() {
-      const refreshToken = this.getRefreshToken();
-      try {
-        const res = await fetch(`${API_BASE}/auth/refresh`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refreshToken: refreshToken || undefined }),
-          credentials: 'include',
-        });
-        if (!res.ok) return null;
-        const data = await res.json();
-        if (data && data.token) {
-          this.setToken(data.token);
-          if (data.refreshToken) this.setRefreshToken(data.refreshToken);
-          if (data.user) this.setCurrentUser(data.user);
-          return data;
+      if (this._refreshPromise) return this._refreshPromise;
+      this._refreshPromise = (async () => {
+        const refreshToken = this.getRefreshToken();
+        try {
+          const res = await fetch(`${API_BASE}/auth/refresh`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refreshToken: refreshToken || undefined }),
+            credentials: 'include',
+          });
+          if (!res.ok) return null;
+          const data = await res.json();
+          if (data && data.token) {
+            this.setToken(data.token);
+            if (data.refreshToken) this.setRefreshToken(data.refreshToken);
+            if (data.user) this.setCurrentUser(data.user);
+            return data;
+          }
+          return null;
+        } catch (e) {
+          return null;
+        } finally {
+          this._refreshPromise = null;
         }
-        return null;
-      } catch (e) {
-        return null;
-      }
+      })();
+      return this._refreshPromise;
     },
 
     buildUrl(path, params) {
@@ -209,6 +216,7 @@
     // Stok
     getStockMovements(params) { return this.request(this.buildUrl('/stock/movements', params)); },
     getStockSummary() { return this.request('/stock/summary'); },
+    deleteStockMovement(id) { return this.request(`/stock/movements/${id}`, { method: 'DELETE' }); },
 
     // İhtiyaç Listesi
     getNeedsList(paramsOrIncludeAuto = true) {
@@ -233,11 +241,34 @@
     getMaintenanceRecord(id) { return this.request(`/maintenance/${id}`); },
     createMaintenanceRecord(data) { return this.request('/maintenance', { method: 'POST', body: data }); },
     deleteMaintenanceRecord(id) { return this.request(`/maintenance/${id}`, { method: 'DELETE' }); },
+    uploadMaintenanceAttachment(maintId, file, nameOrOpts, kind, url) {
+      let name = nameOrOpts;
+      if (nameOrOpts && typeof nameOrOpts === 'object') {
+        name = nameOrOpts.name;
+        kind = nameOrOpts.kind;
+        url = nameOrOpts.url;
+      }
+      if (kind === 'link' || !file) {
+        return this.request(`/maintenance/${maintId}/attachments`, {
+          method: 'POST',
+          body: { name: name || 'Bağlantı', kind: 'link', url: url || '' }
+        });
+      }
+      const fd = new FormData();
+      fd.append('file', file, name || file.name || 'belge');
+      if (name) fd.append('name', name);
+      if (kind) fd.append('kind', kind);
+      return this.request(`/maintenance/${maintId}/attachments`, { method: 'POST', body: fd });
+    },
+    deleteMaintenanceAttachment(maintId, attId) {
+      return this.request(`/maintenance/${maintId}/attachments/${attId}`, { method: 'DELETE' });
+    },
 
     // Arızalar
     getFaults(params) { return this.request(this.buildUrl('/faults', params)); },
     getFault(id) { return this.request(`/faults/${id}`); },
     createFault(data) { return this.request('/faults', { method: 'POST', body: data }); },
+    bulkCreateFaults(items) { return this.request('/faults/bulk', { method: 'POST', body: { items } }); },
     updateFault(id, data) { return this.request(`/faults/${id}`, { method: 'PUT', body: data }); },
     deleteFault(id) { return this.request(`/faults/${id}`, { method: 'DELETE' }); },
     uploadFaultAttachment(faultId, file, name, kind) {
@@ -285,15 +316,46 @@
       return this.request(`/ext-maintenance/${recId}/certificates/${certId}`, { method: 'DELETE' });
     },
 
+    // Kalibrasyon
+    getCalibrations(params) { return this.request(this.buildUrl('/calibrations', params)); },
+    getCalibration(id) { return this.request(`/calibrations/${id}`); },
+    createCalibration(data) { return this.request('/calibrations', { method: 'POST', body: data }); },
+    updateCalibration(id, data) { return this.request(`/calibrations/${id}`, { method: 'PUT', body: data }); },
+    deleteCalibration(id) { return this.request(`/calibrations/${id}`, { method: 'DELETE' }); },
+    uploadCalibrationCertificate(calibId, file, nameOrOpts, kind, url) {
+      let name = nameOrOpts;
+      if (nameOrOpts && typeof nameOrOpts === 'object') {
+        name = nameOrOpts.name;
+        kind = nameOrOpts.kind;
+        url = nameOrOpts.url;
+      }
+      if (kind === 'link' || !file) {
+        return this.request(`/calibrations/${calibId}/certificates`, {
+          method: 'POST',
+          body: { name: name || 'Kalibrasyon Belgesi', kind: 'link', url: url || '' }
+        });
+      }
+      const fd = new FormData();
+      fd.append('file', file, name || file.name || 'belge');
+      if (name) fd.append('name', name);
+      if (kind) fd.append('kind', kind);
+      return this.request(`/calibrations/${calibId}/certificates`, { method: 'POST', body: fd });
+    },
+    deleteCalibrationCertificate(calibId, certId) {
+      return this.request(`/calibrations/${calibId}/certificates/${certId}`, { method: 'DELETE' });
+    },
+
     // Projeler
     getProjects(params) { return this.request(this.buildUrl('/projects', params)); },
     getProject(id) { return this.request(`/projects/${id}`); },
     createProject(data) { return this.request('/projects', { method: 'POST', body: data }); },
     updateProject(id, data) { return this.request(`/projects/${id}`, { method: 'PUT', body: data }); },
     deleteProject(id) { return this.request(`/projects/${id}`, { method: 'DELETE' }); },
+    createProjectTask(projectId, data) { return this.addProjectTask(projectId, data); },
     addProjectTask(projectId, data) { return this.request(`/projects/${projectId}/tasks`, { method: 'POST', body: data }); },
     updateProjectTask(projectId, taskId, data) { return this.request(`/projects/${projectId}/tasks/${taskId}`, { method: 'PUT', body: data }); },
     deleteProjectTask(projectId, taskId) { return this.request(`/projects/${projectId}/tasks/${taskId}`, { method: 'DELETE' }); },
+    createProjectQuote(projectId, data, file) { return this.addProjectQuote(projectId, data, file); },
     addProjectQuote(projectId, data, file) {
       if (file) {
         const fd = new FormData();
@@ -303,13 +365,26 @@
       }
       return this.request(`/projects/${projectId}/quotes`, { method: 'POST', body: data });
     },
+    updateProjectQuote(projectId, quoteId, data, file) {
+      if (file) {
+        const fd = new FormData();
+        Object.keys(data).forEach(k => { if (data[k] != null) fd.append(k, data[k]); });
+        fd.append('file', file);
+        return this.request(`/projects/${projectId}/quotes/${quoteId}`, { method: 'PUT', body: fd });
+      }
+      return this.request(`/projects/${projectId}/quotes/${quoteId}`, { method: 'PUT', body: data });
+    },
     deleteProjectQuote(projectId, quoteId) { return this.request(`/projects/${projectId}/quotes/${quoteId}`, { method: 'DELETE' }); },
-    addProjectBudget(projectId, amount, note, date) {
-      return this.request(`/projects/${projectId}/budget`, { method: 'POST', body: { amount, note, date } });
+    addProjectBudget(projectId, amountOrObj, note, date) {
+      const body = (amountOrObj && typeof amountOrObj === 'object') ? amountOrObj : { amount: amountOrObj, note, date };
+      return this.request(`/projects/${projectId}/budget`, { method: 'POST', body });
     },
-    addProjectProgressLog(projectId, note, date) {
-      return this.request(`/projects/${projectId}/progress-logs`, { method: 'POST', body: { note, date } });
+    createProjectBudget(projectId, data) { return this.addProjectBudget(projectId, data); },
+    addProjectProgressLog(projectId, noteOrObj, date) {
+      const body = (noteOrObj && typeof noteOrObj === 'object') ? noteOrObj : { note: noteOrObj, date };
+      return this.request(`/projects/${projectId}/progress-logs`, { method: 'POST', body });
     },
+    createProjectProgressLog(projectId, data) { return this.addProjectProgressLog(projectId, data); },
     deleteProjectProgressLog(projectId, logId) {
       return this.request(`/projects/${projectId}/progress-logs/${logId}`, { method: 'DELETE' });
     },

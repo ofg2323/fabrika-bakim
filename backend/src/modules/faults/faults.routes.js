@@ -152,13 +152,19 @@ router.get('/:id', async (req, res) => {
   res.json(formatted);
 });
 
-// POST /api/faults — Yeni arıza kaydı bildir
+// POST /api/faults — Yeni arıza kaydı bildir (geçmiş tarih ve durum desteğiyle)
 router.post('/', async (req, res) => {
-  const { assetId, title, description, priority, assignedTo } = req.body;
+  const { assetId, title, description, priority, assignedTo, reportedDate, status, resolvedDate, externalServiceCost, notes, reportedBy } = req.body;
 
   if (!assetId || !title || !title.trim()) {
     return res.status(400).json({ error: 'Varlık seçimi ve arıza başlığı zorunludur.' });
   }
+
+  const faultStatus = status && ['Açık', 'Devam Ediyor', 'Tamamlandı'].includes(status) ? status : 'Açık';
+  const faultPriority = priority && ['Düşük', 'Orta', 'Yüksek', 'Kritik'].includes(priority) ? (priority === 'Kritik' ? 'Yüksek' : priority) : 'Orta';
+  const rDate = reportedDate && /^\d{4}-\d{2}-\d{2}/.test(reportedDate) ? reportedDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
+  const resDate = resolvedDate && /^\d{4}-\d{2}-\d{2}/.test(resolvedDate) ? resolvedDate.slice(0, 10) : (faultStatus === 'Tamamlandı' ? rDate : null);
+  const cost = parseFloat(externalServiceCost) || 0;
 
   const client = await pool.connect();
   try {
@@ -176,22 +182,27 @@ router.post('/', async (req, res) => {
     const { rows: faultRows } = await client.query(
       `INSERT INTO faults (
         tracking_no, asset_id, title, description, reported_by, 
-        reported_date, priority, status, assigned_to
-      ) VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6, 'Açık', $7)
+        reported_date, priority, status, assigned_to, resolved_date, notes, external_service_cost
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING *`,
       [
         trackingNo,
         assetId,
         title.trim(),
         description ? description.trim() : null,
-        req.user.id,
-        priority || 'Orta',
+        reportedBy || req.user.id,
+        rDate,
+        faultPriority,
+        faultStatus,
         assignedTo || null,
+        resDate,
+        notes ? notes.trim() : null,
+        cost,
       ]
     );
 
-    // Eğer varlık aktif ise durumunu 'Arızalı' yap
-    if (assetRows[0].status === 'Aktif') {
+    // Eğer arıza henüz açık ise ve varlık aktif ise durumunu 'Arızalı' yap
+    if (faultStatus !== 'Tamamlandı' && assetRows[0].status === 'Aktif') {
       await client.query("UPDATE assets SET status = 'Arızalı' WHERE id = $1", [assetId]);
     }
 
@@ -201,12 +212,83 @@ router.post('/', async (req, res) => {
       action: 'CREATE',
       entityType: 'fault',
       entityId: faultRows[0].id,
-      details: { trackingNo, assetId, title: title.trim(), priority },
+      details: { trackingNo, assetId, title: title.trim(), priority: faultPriority, status: faultStatus },
       ipAddress: getClientIp(req),
     });
 
     await client.query('COMMIT');
     res.status(201).json(toCamelFault(faultRows[0]));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/faults/bulk — Toplu arıza kaydı aktarımı (geçmiş ve açık kayıtlar)
+router.post('/bulk', requireRole('Yönetici', 'Teknisyen'), async (req, res) => {
+  const { items } = req.body;
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'İçe aktarılacak arıza kayıtları bulunamadı.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const created = [];
+
+    for (const item of items) {
+      const { assetId, title, description, priority, assignedTo, reportedBy, reportedDate, status, resolvedDate, externalServiceCost, notes } = item;
+      if (!assetId || !title || !title.trim()) continue;
+
+      const trackingNo = await getNextTrackingNo('fault', client);
+      const faultStatus = status && ['Açık', 'Devam Ediyor', 'Tamamlandı'].includes(status) ? status : 'Açık';
+      const faultPriority = priority && ['Düşük', 'Orta', 'Yüksek', 'Kritik'].includes(priority) ? (priority === 'Kritik' ? 'Yüksek' : priority) : 'Orta';
+      const rDate = reportedDate && /^\d{4}-\d{2}-\d{2}/.test(reportedDate) ? reportedDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
+      const resDate = resolvedDate && /^\d{4}-\d{2}-\d{2}/.test(resolvedDate) ? resolvedDate.slice(0, 10) : (faultStatus === 'Tamamlandı' ? rDate : null);
+      const cost = parseFloat(externalServiceCost) || 0;
+
+      const { rows } = await client.query(
+        `INSERT INTO faults (
+          tracking_no, asset_id, title, description, reported_by, 
+          reported_date, priority, status, assigned_to, resolved_date, notes, external_service_cost
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        RETURNING *`,
+        [
+          trackingNo,
+          assetId,
+          title.trim(),
+          description ? description.trim() : null,
+          reportedBy || req.user.id,
+          rDate,
+          faultPriority,
+          faultStatus,
+          assignedTo || null,
+          resDate,
+          notes ? notes.trim() : null,
+          cost,
+        ]
+      );
+
+      if (faultStatus !== 'Tamamlandı') {
+        await client.query("UPDATE assets SET status = 'Arızalı' WHERE id = $1 AND status = 'Aktif'", [assetId]);
+      }
+
+      created.push(toCamelFault(rows[0]));
+    }
+
+    await logAudit(client, {
+      userId: req.user.id,
+      userName: req.user.name,
+      action: 'BULK_IMPORT',
+      entityType: 'fault',
+      details: { count: created.length },
+      ipAddress: getClientIp(req),
+    });
+
+    await client.query('COMMIT');
+    res.status(201).json({ count: created.length, items: created });
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

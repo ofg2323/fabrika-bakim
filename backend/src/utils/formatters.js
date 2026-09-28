@@ -11,7 +11,7 @@ function toCamelMaterial(m) {
     unitCost: parseFloat(m.unit_cost) || 0,
     defaultSupplierId: m.default_supplier_id,
     defaultSupplierName: m.default_supplier_name || null,
-    isLowStock: (parseFloat(m.qty) || 0) <= (parseFloat(m.min_qty) || 0),
+    isLowStock: (parseFloat(m.qty) || 0) < (parseFloat(m.min_qty) || 0),
   };
 }
 
@@ -111,6 +111,7 @@ function toCamelMaintenance(r) {
     materialsCost: parseFloat(r.materials_cost) || 0,
     totalCost: (parseFloat(r.extra_cost) || 0) + (parseFloat(r.materials_cost) || 0),
     usedMaterials: r.used_materials || [],
+    attachments: r.attachments || [],
   };
 }
 
@@ -163,6 +164,26 @@ function toCamelInspection(r) {
 }
 
 function toCamelExtMaint(r) {
+  if (!r) return null;
+  return {
+    id: r.id,
+    trackingNo: r.tracking_no,
+    groupId: r.group_id,
+    groupName: r.group_name || null,
+    contractor: r.contractor || '',
+    startDate: r.start_date,
+    endDate: r.end_date,
+    notes: r.notes || '',
+    serviceCost: parseFloat(r.service_cost) || 0,
+    completedBy: r.completed_by,
+    completedByName: r.completed_by_name || null,
+    assetIds: r.asset_ids || [],
+    assets: r.assets || [],
+    certificates: r.certificates || [],
+  };
+}
+
+function toCamelCalibration(r) {
   if (!r) return null;
   return {
     id: r.id,
@@ -256,6 +277,7 @@ module.exports = {
   toCamelFault,
   toCamelInspection,
   toCamelExtMaint,
+  toCamelCalibration,
   toCamelProject,
   toCamelSettings,
 };

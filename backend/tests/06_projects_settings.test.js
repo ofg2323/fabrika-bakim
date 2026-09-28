@@ -122,6 +122,23 @@ describe('Modül 13 & 14: Projeler ve Sistem Ayarları Testleri', () => {
     assert.ok(res.data.budgetHistory.length >= 1);
   });
 
+  test('Proje listesinde de alt bileşenler (teklifler, görevler vb.) eksiksiz dönmeli (GET /api/projects)', async () => {
+    assert.ok(projectId);
+
+    const res = await api('/api/projects', {}, adminToken);
+    assert.strictEqual(res.status, 200);
+    assert.ok(Array.isArray(res.data));
+    const proj = res.data.find(p => p.id === projectId);
+    assert.ok(proj, 'Oluşturulan proje listede bulunmalı');
+    assert.ok(Array.isArray(proj.quotes), 'Teklifler dizisi olmalı');
+    assert.strictEqual(proj.quotes.length, 1);
+    assert.strictEqual(proj.quotes[0].amount, 145000);
+    assert.ok(Array.isArray(proj.tasks), 'Görevler dizisi olmalı');
+    assert.strictEqual(proj.tasks.length, 1);
+    assert.ok(Array.isArray(proj.progressLogs), 'İlerleme günlüğü dizisi olmalı');
+    assert.strictEqual(proj.progressLogs.length, 1);
+  });
+
   test('Proje silinebilmeli (DELETE /api/projects/:id)', async () => {
     assert.ok(projectId);
 

@@ -14,7 +14,7 @@ router.get('/summary', async (req, res) => {
     pool.query(`
       SELECT 
         COUNT(*)::int AS total_materials,
-        COUNT(CASE WHEN qty <= min_qty THEN 1 END)::int AS low_stock_count
+        COUNT(CASE WHEN qty < min_qty THEN 1 END)::int AS low_stock_count
       FROM materials
     `),
     pool.query(`
@@ -160,6 +160,62 @@ router.post('/movements', requireRole('Yönetici', 'Depo Sorumlusu'), async (req
 
     await client.query('COMMIT');
     res.status(201).json(toCamelStockMovement(newMovements[0]));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/stock/movements/:id — Stok hareketini sil ve malzeme stoğunu geri al
+router.delete('/movements/:id', requireRole('Yönetici', 'Depo Sorumlusu'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: movRows } = await client.query('SELECT * FROM stock_movements WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!movRows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Stok hareketi bulunamadı.' });
+    }
+
+    const mov = movRows[0];
+    const movQty = parseFloat(mov.qty) || 0;
+
+    const { rows: matRows } = await client.query('SELECT id, name, qty FROM materials WHERE id = $1 FOR UPDATE', [mov.material_id]);
+    if (!matRows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'İlişkili malzeme bulunamadı.' });
+    }
+
+    const currentQty = parseFloat(matRows[0].qty) || 0;
+
+    if (mov.type === 'Giriş') {
+      if (currentQty < movQty) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: `Stok hareketi silinemez: Bu girişle stoğa eklenen ${movQty} adet malzemenin bir kısmı kullanılmış. Mevcut stok (${currentQty}) silinmek istenen miktardan az.`
+        });
+      }
+      await client.query('UPDATE materials SET qty = qty - $1 WHERE id = $2', [movQty, mov.material_id]);
+    } else if (mov.type === 'Çıkış') {
+      await client.query('UPDATE materials SET qty = qty + $1 WHERE id = $2', [movQty, mov.material_id]);
+    }
+
+    await client.query('DELETE FROM stock_movements WHERE id = $1', [mov.id]);
+
+    await logAudit(client, {
+      userId: req.user.id,
+      action: 'DELETE',
+      entityType: 'stock_movements',
+      entityId: mov.id,
+      details: { materialId: mov.material_id, type: mov.type, qty: movQty, reason: mov.reason },
+      ipAddress: getClientIp(req),
+    });
+
+    await client.query('COMMIT');
+    res.status(204).end();
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

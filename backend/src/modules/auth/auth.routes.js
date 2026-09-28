@@ -13,13 +13,13 @@ function generateTokens(user) {
   const token = jwt.sign(
     { id: user.id, name: user.name, role: user.role },
     accessSecret,
-    { expiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m' }
+    { expiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '24h' }
   );
 
   const refreshToken = jwt.sign(
     { id: user.id, type: 'refresh' },
     refreshSecret,
-    { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d' }
+    { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d' }
   );
 
   return { token, refreshToken };
@@ -27,7 +27,7 @@ function generateTokens(user) {
 
 function setRefreshCookie(res, refreshToken) {
   const isProd = process.env.NODE_ENV === 'production';
-  const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 gün
+  const maxAge = 30 * 24 * 60 * 60 * 1000; // 30 gün
   res.cookie('cmms_refresh_token', refreshToken, {
     httpOnly: true,
     secure: isProd,

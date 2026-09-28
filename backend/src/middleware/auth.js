@@ -21,7 +21,10 @@ function requireAuth(req, res, next) {
     token = String(req.query.token).trim();
   }
 
-  if (!token) return res.status(401).json({ error: 'Oturum bulunamadı.' });
+  if (!token) {
+    console.warn(`[AUTH 401] Token bulunamadı: ${req.method} ${req.originalUrl}`);
+    return res.status(401).json({ error: 'Oturum bulunamadı.' });
+  }
 
   const secret = process.env.JWT_SECRET;
   if (!secret) return res.status(500).json({ error: 'Sunucu güvenlik yapılandırma hatası.' });
@@ -31,6 +34,7 @@ function requireAuth(req, res, next) {
     req.user = payload; // { id, name, role }
     next();
   } catch (e) {
+    console.warn(`[AUTH 401] Token doğrulanamadı (${e.name}: ${e.message}): ${req.method} ${req.originalUrl}`);
     return res.status(401).json({ error: 'Oturum geçersiz veya süresi dolmuş.' });
   }
 }

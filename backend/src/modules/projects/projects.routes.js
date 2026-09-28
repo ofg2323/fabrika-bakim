@@ -79,7 +79,100 @@ router.get('/', async (req, res) => {
   const { rows } = await pool.query(query, params);
   const totalCount = rows.length > 0 ? parseInt(rows[0].full_count, 10) : 0;
   setPaginationHeaders(res, totalCount, limit, offset);
-  res.json(rows.map(toCamelProject));
+
+  if (rows.length === 0) {
+    return res.json([]);
+  }
+
+  const projectIds = rows.map(r => r.id);
+  const [tasksRes, quotesRes, budgetRes, progressRes] = await Promise.all([
+    pool.query('SELECT * FROM project_tasks WHERE project_id = ANY($1::uuid[]) ORDER BY start_date ASC, id ASC', [projectIds]),
+    pool.query('SELECT * FROM project_quotes WHERE project_id = ANY($1::uuid[]) ORDER BY date DESC, id DESC', [projectIds]),
+    pool.query(`
+      SELECT pbh.*, u.name AS user_name 
+      FROM project_budget_history pbh
+      LEFT JOIN users u ON u.id = pbh.user_id
+      WHERE pbh.project_id = ANY($1::uuid[]) 
+      ORDER BY pbh.date DESC, pbh.id DESC
+    `, [projectIds]),
+    pool.query(`
+      SELECT ppl.*, u.name AS user_name
+      FROM project_progress_logs ppl
+      LEFT JOIN users u ON u.id = ppl.user_id
+      WHERE ppl.project_id = ANY($1::uuid[])
+      ORDER BY ppl.date DESC, ppl.id DESC
+    `, [projectIds]),
+  ]);
+
+  const tasksByProj = {};
+  const quotesByProj = {};
+  const budgetByProj = {};
+  const progressByProj = {};
+
+  tasksRes.rows.forEach(t => {
+    if (!tasksByProj[t.project_id]) tasksByProj[t.project_id] = [];
+    tasksByProj[t.project_id].push({
+      id: t.id,
+      title: t.title,
+      assignType: t.assign_type,
+      assignee: t.assignee || '',
+      status: t.status,
+      cost: parseFloat(t.cost) || 0,
+      startDate: t.start_date,
+      endDate: t.end_date,
+      note: t.note || '',
+    });
+  });
+
+  quotesRes.rows.forEach(q => {
+    if (!quotesByProj[q.project_id]) quotesByProj[q.project_id] = [];
+    quotesByProj[q.project_id].push({
+      id: q.id,
+      supplierId: q.supplier_id,
+      supplierName: q.supplier_name || '',
+      amount: parseFloat(q.amount) || 0,
+      date: q.date,
+      validUntil: q.valid_until,
+      status: q.status,
+      fileStorageKey: q.file_storage_key,
+      fileName: q.file_name,
+      note: q.note || '',
+    });
+  });
+
+  budgetRes.rows.forEach(b => {
+    if (!budgetByProj[b.project_id]) budgetByProj[b.project_id] = [];
+    budgetByProj[b.project_id].push({
+      id: b.id,
+      date: b.date,
+      amount: parseFloat(b.amount) || 0,
+      note: b.note || '',
+      userId: b.user_id,
+      userName: b.user_name || null,
+    });
+  });
+
+  progressRes.rows.forEach(l => {
+    if (!progressByProj[l.project_id]) progressByProj[l.project_id] = [];
+    progressByProj[l.project_id].push({
+      id: l.id,
+      date: l.date,
+      note: l.note,
+      userId: l.user_id,
+      userName: l.user_name || null,
+    });
+  });
+
+  const formattedProjects = rows.map(r => {
+    const p = toCamelProject(r);
+    p.tasks = tasksByProj[r.id] || [];
+    p.quotes = quotesByProj[r.id] || [];
+    p.budgetHistory = budgetByProj[r.id] || [];
+    p.progressLogs = progressByProj[r.id] || [];
+    return p;
+  });
+
+  res.json(formattedProjects);
 });
 
 // GET /api/projects/:id — Tekil proje detayı (görevler, teklifler, bütçe geçmişi ve alımlarla birlikte)
@@ -185,7 +278,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/projects — Yeni proje oluştur
-router.post('/', requireRole('Yönetici'), async (req, res) => {
+router.post('/', requireRole('Yönetici', 'Teknisyen'), async (req, res) => {
   const {
     name,
     description,
@@ -260,7 +353,7 @@ router.post('/', requireRole('Yönetici'), async (req, res) => {
 });
 
 // PUT /api/projects/:id — Proje bilgilerini güncelle
-router.put('/:id', requireRole('Yönetici'), async (req, res) => {
+router.put('/:id', requireRole('Yönetici', 'Teknisyen'), async (req, res) => {
   const {
     name,
     description,
@@ -425,6 +518,57 @@ router.post('/:id/quotes', upload.single('file'), async (req, res) => {
   res.status(201).json(rows[0]);
 });
 
+// PUT /api/projects/:id/quotes/:quoteId — Teklif güncelle
+router.put('/:id/quotes/:quoteId', upload.single('file'), async (req, res) => {
+  const { supplierId, supplierName, amount, date, validUntil, status, note } = req.body;
+  const { rows: existing } = await pool.query('SELECT * FROM project_quotes WHERE id = $1 AND project_id = $2', [req.params.quoteId, req.params.id]);
+  if (!existing[0]) return res.status(404).json({ error: 'Teklif bulunamadı.' });
+
+  let storageKey = existing[0].file_storage_key;
+  let fileName = existing[0].file_name;
+  if (req.file) {
+    if (storageKey) safeUnlink(storageKey);
+    storageKey = req.file.filename;
+    fileName = req.file.originalname;
+  }
+
+  let finalSupplierName = supplierName !== undefined ? (supplierName || '').trim() : existing[0].supplier_name;
+  if (!finalSupplierName && supplierId) {
+    const sRes = await pool.query('SELECT name FROM suppliers WHERE id = $1', [supplierId]);
+    if (sRes.rows[0]) finalSupplierName = sRes.rows[0].name;
+  }
+
+  const { rows } = await pool.query(
+    `UPDATE project_quotes SET
+      supplier_id = COALESCE($1, supplier_id),
+      supplier_name = $2,
+      amount = COALESCE($3, amount),
+      date = COALESCE($4, date),
+      valid_until = $5,
+      status = COALESCE($6, status),
+      file_storage_key = $7,
+      file_name = $8,
+      note = $9
+     WHERE id = $10 AND project_id = $11
+     RETURNING *`,
+    [
+      supplierId || null,
+      finalSupplierName,
+      amount !== undefined ? parseFloat(amount) : null,
+      date || null,
+      validUntil || null,
+      status || null,
+      storageKey,
+      fileName,
+      note !== undefined ? (note ? note.trim() : null) : existing[0].note,
+      req.params.quoteId,
+      req.params.id,
+    ]
+  );
+
+  res.json(rows[0]);
+});
+
 // DELETE /api/projects/:id/quotes/:quoteId — Teklif sil
 router.delete('/:id/quotes/:quoteId', async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM project_quotes WHERE id = $1 AND project_id = $2', [req.params.quoteId, req.params.id]);
@@ -439,7 +583,7 @@ router.delete('/:id/quotes/:quoteId', async (req, res) => {
 });
 
 // POST /api/projects/:id/budget — Bütçe revizyonu ekle ve ana bütçeyi güncelle
-router.post('/:id/budget', requireRole('Yönetici'), async (req, res) => {
+router.post('/:id/budget', requireRole('Yönetici', 'Teknisyen'), async (req, res) => {
   const { amount, note, date } = req.body;
   const budgetVal = parseFloat(amount);
 
@@ -501,7 +645,7 @@ router.delete('/:id/progress-logs/:logId', async (req, res) => {
 });
 
 // DELETE /api/projects/:id — Projeyi sil (Satın alma bağlantılarını güvenle koparır)
-router.delete('/:id', requireRole('Yönetici'), async (req, res) => {
+router.delete('/:id', requireRole('Yönetici', 'Teknisyen'), async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');

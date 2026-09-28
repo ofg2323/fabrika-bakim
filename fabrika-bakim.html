@@ -42,7 +42,7 @@ html,body{min-height:100%; margin:0; background:var(--bg); color:var(--ink); fon
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible{outline:2px solid var(--accent); outline-offset:2px;}
 #root{min-height:100vh; width:100%; display:flex; flex-direction:column;}
 #app{display:flex; min-height:100vh; width:100%; flex:1;}
-.sidebar{width:210px; background:var(--sidebar); color:var(--sidebar-ink); flex-shrink:0; display:flex; flex-direction:column;}
+.sidebar{width:210px; background:var(--sidebar); color:var(--sidebar-ink); flex-shrink:0; display:flex; flex-direction:column; position:sticky; top:0; height:100vh; overflow-y:auto;}
 .brand{padding:18px 16px 14px; border-bottom:1px solid #333e4a;}
 .brand .b1{font-weight:800; font-size:15px; color:#fff; letter-spacing:-0.01em;}
 .brand .b2{font-size:10.5px; color:#8993a2; margin-top:2px; letter-spacing:.03em; text-transform:uppercase;}
@@ -183,24 +183,28 @@ tbody tr:hover{background:#fafbfa;}
 }
 
 /* Print / form output */
-#printArea{display:none; color:#000; background:#fff;}
-.print-header{text-align:center; margin-bottom:16px; border-bottom:2px solid #000; padding-bottom:10px;}
-.print-logo{max-height:64px; max-width:220px; margin-bottom:8px;}
-.print-company{font-weight:800; font-size:16px;}
-.print-title{font-size:13px; margin-top:2px; text-transform:uppercase; letter-spacing:.05em;}
-.print-table{width:100%; border-collapse:collapse; margin-bottom:14px; font-size:12px;}
-.print-table th, .print-table td{border:1px solid #333; padding:5px 8px; text-align:left;}
-.print-table th{background:#eee; font-weight:700; width:120px;}
-.print-section-title{font-weight:800; font-size:12.5px; margin:14px 0 6px; text-transform:uppercase; letter-spacing:.03em;}
-.print-note{border:1px solid #333; padding:8px; font-size:12px; min-height:40px; white-space:pre-wrap;}
-.print-signatures{display:flex; gap:30px; margin-top:40px;}
-.print-sig-box{flex:1; text-align:center; font-size:11px;}
-.print-sig-line{border-top:1px solid #000; margin-bottom:6px; height:40px;}
-.print-footer{margin-top:20px; font-size:10px; color:#555; text-align:center; border-top:1px solid #ccc; padding-top:6px;}
+#printArea{display:none; color:#000; background:#fff; font-size:11px; line-height:1.25;}
+.print-header-table{width:100%; border:2px solid #000; border-collapse:collapse; margin-bottom:8px;}
+.print-header-table td{border:1px solid #000; padding:4px 6px; vertical-align:middle;}
+.print-logo{max-height:48px; max-width:140px; object-fit:contain;}
+.print-company{font-weight:800; font-size:13px;}
+.print-title{font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.03em;}
+.print-table{width:100%; border-collapse:collapse; margin-bottom:7px; font-size:10.5px;}
+.print-table th, .print-table td{border:1px solid #333; padding:3px 6px; text-align:left;}
+.print-table th{background:#f0f0f0; font-weight:700; width:110px;}
+.print-section-title{font-weight:800; font-size:11px; margin:7px 0 3px; text-transform:uppercase; letter-spacing:.02em;}
+.print-note{border:1px solid #333; padding:4px 6px; font-size:10.5px; min-height:28px; white-space:pre-wrap;}
+.print-signatures{display:flex; gap:20px; margin-top:14px; page-break-inside:avoid;}
+.print-sig-box{flex:1; text-align:center; font-size:10px;}
+.print-sig-line{border-top:1px solid #000; margin-bottom:4px; height:24px;}
+.print-footer{margin-top:10px; font-size:9.5px; color:#555; text-align:center; border-top:1px solid #ccc; padding-top:4px;}
+@page{size:A4 portrait; margin:8mm 10mm;}
 @media print{
+  html,body{background:#fff !important; margin:0 !important; padding:0 !important;}
   #app{display:none !important;}
   .overlay{display:none !important;}
-  #printArea{display:block !important;}
+  #printArea{display:block !important; width:100% !important; page-break-after:avoid;}
+  .print-table, .print-header-table, .print-note, .print-signatures{page-break-inside:avoid;}
 }
 </style>
 <style id="printPageStyle"></style>
@@ -220,12 +224,13 @@ window.db = {
   faults: [],
   inspectionRecords: [],
   extMaintRecords: [],
+  calibrationRecords: [],
   purchases: [],
   needsList: [],
   stockMovements: [],
   suppliers: [],
   projects: [],
-  counters: { fault: 0, maint: 0, inspection: 0, extmaint: 0, project: 0 },
+  counters: { fault: 0, maint: 0, inspection: 0, extmaint: 0, calibration: 0, project: 0 },
   printTemplate: {}
 };
 let db = window.db;
@@ -235,20 +240,23 @@ let maintFilter = 'upcoming';
 let faultFilter = 'open';
 let stockTab = 'materials';
 let tempChecklist = [], tempChecklistResults = [], tempUsedMaterials = [], tempOriginalUsed = [], tempSpareParts = [];
+let tempMaintAttachments = [], maintAttachmentsToDelete = [];
 let _confirmCb = null;
 let assetQuery='', assetFGroup='', assetFStatus='';
 let faultQuery='', faultFPriority='', faultFAssignee='';
 let maintQuery='', maintFGroup='', maintHistQuery='', maintFType='';
 let inspectionFilter='upcoming', inspectionQuery='', inspectionFGroup='', inspectionHistQuery='';
 let extMaintFilter='upcoming', extMaintFGroup='', extMaintHistQuery='';
-let tempExtMaintAssetIds = [];
+let calibrationFilter='upcoming', calibrationQuery='', calibrationFGroup='', calibrationHistQuery='';
+let tempExtMaintAssetIds = [], tempCalibrationAssetIds = [];
 let tempCertificates = [], certsToDelete = [];
+let tempCalibrationCertificates = [], calibCertsToDelete = [];
 let stockMatQuery='', stockMatFStatus='';
 let needsQuery='', needsFStatus='';
 let purchQuery='';
 let supplierQuery='';
 let costStartDate='', costEndDate='', costFType='';
-let currentProjectId = null, projectDetailTab = 'genel', projectQuery='', projectFStatus='';
+var currentProjectId = null, projectDetailTab = 'genel', projectQuery='', projectFStatus='';
 let movQuery='', movFType='';
 let comboData = {}, comboOnChangeMap = {};
 function comboHtml(id, placeholder){
@@ -312,6 +320,10 @@ const DEFAULT_PRINT_TEMPLATE = {
   pageSize:'A4',
   orientation:'portrait',
   maint:{
+    formTitle:'PERİYODİK BAKIM FORMU',
+    formNo:'FR-BK-01',
+    revisionNo:'01',
+    revisionDate:'01.01.2025',
     showAssetInfo:true,
     showTypeAndDates:true,
     showChecklist:true,
@@ -322,6 +334,10 @@ const DEFAULT_PRINT_TEMPLATE = {
     blockOrder:['header','assetInfo','typeAndDates','checklist','materials','costs','notes','signatures'],
   },
   fault:{
+    formTitle:'ARIZA BİLDİRİM VE ONARIM FORMU',
+    formNo:'FR-AR-01',
+    revisionNo:'01',
+    revisionDate:'01.01.2025',
     showAssetInfo:true,
     showPriorityStatus:true,
     showDescription:true,
@@ -345,6 +361,10 @@ function migratePrintTemplate(t){
     pageSize: t.pageSize || 'A4',
     orientation: t.orientation || 'portrait',
     maint:{
+      formTitle: mt.formTitle || 'PERİYODİK BAKIM FORMU',
+      formNo: mt.formNo || 'FR-BK-01',
+      revisionNo: mt.revisionNo || '01',
+      revisionDate: mt.revisionDate || '01.01.2025',
       showAssetInfo: mt.showAssetInfo!==undefined ? mt.showAssetInfo : true,
       showTypeAndDates: mt.showTypeAndDates!==undefined ? mt.showTypeAndDates : true,
       showChecklist: mt.showChecklist!==undefined ? mt.showChecklist : true,
@@ -355,6 +375,10 @@ function migratePrintTemplate(t){
       blockOrder: (mt.blockOrder && mt.blockOrder.length) ? mt.blockOrder : ['header','assetInfo','typeAndDates','checklist','materials','costs','notes','signatures'],
     },
     fault:{
+      formTitle: ft.formTitle || 'ARIZA BİLDİRİM VE ONARIM FORMU',
+      formNo: ft.formNo || 'FR-AR-01',
+      revisionNo: ft.revisionNo || '01',
+      revisionDate: ft.revisionDate || '01.01.2025',
       showAssetInfo: ft.showAssetInfo!==undefined ? ft.showAssetInfo : true,
       showPriorityStatus: ft.showPriorityStatus!==undefined ? ft.showPriorityStatus : true,
       showDescription: ft.showDescription!==undefined ? ft.showDescription : true,
@@ -513,11 +537,11 @@ async function saveSession(userId){
   try{ await window.storage.set(SESSION_KEY, JSON.stringify({userId}), false); } catch(e){}
 }
 
-function group(id){ return db.assetGroups.find(g=>g.id===id); }
-function asset(id){ return db.assets.find(a=>a.id===id); }
-function user(id){ return db.users.find(u=>u.id===id); }
-function material(id){ return db.materials.find(m=>m.id===id); }
-function supplier(id){ return db.suppliers.find(s=>s.id===id); }
+function group(id){ return (db && db.assetGroups ? db.assetGroups : []).find(g=>g && g.id===id); }
+function asset(id){ return (db && db.assets ? db.assets : []).find(a=>a && a.id===id); }
+function user(id){ return (db && db.users ? db.users : []).find(u=>u && u.id===id); }
+function material(id){ return (db && db.materials ? db.materials : []).find(m=>m && m.id===id); }
+function supplier(id){ return (db && db.suppliers ? db.suppliers : []).find(s=>s && s.id===id); }
 function userName(id){ const u=user(id); return u?u.name:'—'; }
 
 function nextDueDate(as){
@@ -550,6 +574,16 @@ function nextExtMaintDue(as){
   d.setDate(d.getDate() + Number(g.extMaintPeriodDays || 0));
   return isNaN(d.getTime()) ? null : d.toISOString().slice(0,10);
 }
+function nextCalibrationDue(as){
+  const g = group(as.groupId);
+  if(!g || !g.calibrationEnabled || !g.calibrationPeriodDays) return null;
+  const raw = as.lastCalibrationDate || g.calibrationBaselineDate || as.createdDate || todayStr();
+  const base = String(raw).slice(0, 10);
+  const d = new Date(base+'T00:00:00');
+  if (isNaN(d.getTime())) return null;
+  d.setDate(d.getDate() + Number(g.calibrationPeriodDays || 0));
+  return isNaN(d.getTime()) ? null : d.toISOString().slice(0,10);
+}
 function daysDiff(dateStr){
   if(!dateStr) return 0;
   const base = String(dateStr).slice(0, 10);
@@ -577,10 +611,15 @@ function role(){ return currentUser ? currentUser.role : null; }
 function can(perm){
   const r = role();
   if(r==='Yönetici') return true;
-  if(perm==='manageTemplates'||perm==='editTemplates') return false;
+  if(r==='Teknisyen'){
+    if(perm==='manageProjects'||perm==='manageTemplates'||perm==='editTemplates'||perm==='editAssets'||perm==='editGroups') return true;
+    if(perm==='doMaintenance'||perm==='manageFaults'||perm==='doInspection'||perm==='doExtMaint'||perm==='doCalibration'||perm==='updateProjectProgress') return true;
+    if(perm==='editUsers') return false;
+    return true;
+  }
   if(perm==='editStock') return r==='Depo Sorumlusu';
   if(perm==='editAssets'||perm==='editGroups'||perm==='editUsers'||perm==='manageProjects') return false;
-  if(perm==='doMaintenance'||perm==='manageFaults'||perm==='doInspection'||perm==='doExtMaint'||perm==='updateProjectProgress') return r==='Teknisyen';
+  if(perm==='doMaintenance'||perm==='manageFaults'||perm==='doInspection'||perm==='doExtMaint'||perm==='doCalibration'||perm==='updateProjectProgress') return r==='Teknisyen';
   return false;
 }
 
@@ -602,11 +641,18 @@ function recalcAssetLastExtMaint(assetId){
   if(!recs.length) return;
   a.lastExtMaintDate = recs.reduce((mx,r)=> r.endDate>mx?r.endDate:mx, recs[0].endDate);
 }
+function recalcAssetLastCalibration(assetId){
+  const recs = (db.calibrationRecords||[]).filter(r=>(r.assetIds||[]).includes(assetId));
+  const a = asset(assetId); if(!a) return;
+  if(!recs.length) return;
+  a.lastCalibrationDate = recs.reduce((mx,r)=> r.endDate>mx?r.endDate:mx, recs[0].endDate);
+}
 function computeGroupInspectionSummary(windowDays){
   return db.assetGroups.filter(g=>g.inspectionEnabled).map(g=>{
     const assets = db.assets.filter(a=>a.groupId===g.id);
     const withDue = assets.map(a=>({a, due: nextInspectionDue(a)})).filter(x=>x.due);
-    const dueSoon = withDue.filter(x=> daysDiff(x.due) <= windowDays).sort((p,q)=>p.due.localeCompare(q.due));
+    const dueSoon = (windowDays != null ? withDue.filter(x=> daysDiff(x.due) <= windowDays) : withDue)
+      .sort((p,q)=>p.due.localeCompare(q.due));
     return {group:g, assets, withDue, dueSoon};
   }).filter(x=>x.dueSoon.length>0);
 }
@@ -614,7 +660,17 @@ function computeGroupExtMaintSummary(windowDays){
   return db.assetGroups.filter(g=>g.extMaintEnabled).map(g=>{
     const assets = db.assets.filter(a=>a.groupId===g.id);
     const withDue = assets.map(a=>({a, due: nextExtMaintDue(a)})).filter(x=>x.due);
-    const dueSoon = withDue.filter(x=> daysDiff(x.due) <= windowDays).sort((p,q)=>p.due.localeCompare(q.due));
+    const dueSoon = (windowDays != null ? withDue.filter(x=> daysDiff(x.due) <= windowDays) : withDue)
+      .sort((p,q)=>p.due.localeCompare(q.due));
+    return {group:g, assets, withDue, dueSoon};
+  }).filter(x=>x.dueSoon.length>0);
+}
+function computeGroupCalibrationSummary(windowDays){
+  return (db.assetGroups||[]).filter(g=>g.calibrationEnabled).map(g=>{
+    const assets = (db.assets||[]).filter(a=>a.groupId===g.id);
+    const withDue = assets.map(a=>({a, due: nextCalibrationDue(a)})).filter(x=>x.due);
+    const dueSoon = (windowDays != null ? withDue.filter(x=> daysDiff(x.due) <= windowDays) : withDue)
+      .sort((p,q)=>p.due.localeCompare(q.due));
     return {group:g, assets, withDue, dueSoon};
   }).filter(x=>x.dueSoon.length>0);
 }
@@ -692,27 +748,33 @@ function parseCSV(text){
   return rows.filter(r=> r.some(c=>c && c.trim()!==''));
 }
 function nextTrackingNo(kind){
-  db.counters = db.counters || {fault:0, maint:0, inspection:0, extmaint:0, project:0};
+  db.counters = db.counters || {fault:0, maint:0, inspection:0, extmaint:0, calibration:0, project:0};
   db.counters[kind] = (db.counters[kind]||0) + 1;
-  const prefixMap = {fault:'A', maint:'B', inspection:'C', extmaint:'D', project:'P'};
+  const prefixMap = {fault:'A', maint:'B', inspection:'C', extmaint:'D', calibration:'K', project:'P'};
   const prefix = prefixMap[kind] || 'X';
   return prefix + String(db.counters[kind]).padStart(5,'0');
 }
 const PRINT_CSS = `
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Helvetica,Arial,sans-serif; color:#000; margin:0; padding:10mm;}
-.print-header{text-align:center; margin-bottom:16px; border-bottom:2px solid #000; padding-bottom:10px;}
-.print-logo{max-height:64px; max-width:220px; margin-bottom:8px;}
-.print-company{font-weight:800; font-size:16px;}
-.print-title{font-size:13px; margin-top:2px; text-transform:uppercase; letter-spacing:.05em;}
-.print-table{width:100%; border-collapse:collapse; margin-bottom:14px; font-size:12px;}
-.print-table th, .print-table td{border:1px solid #333; padding:5px 8px; text-align:left;}
-.print-table th{background:#eee; font-weight:700; width:120px;}
-.print-section-title{font-weight:800; font-size:12.5px; margin:14px 0 6px; text-transform:uppercase; letter-spacing:.03em;}
-.print-note{border:1px solid #333; padding:8px; font-size:12px; min-height:40px; white-space:pre-wrap;}
-.print-signatures{display:flex; gap:30px; margin-top:40px;}
-.print-sig-box{flex:1; text-align:center; font-size:11px;}
-.print-sig-line{border-top:1px solid #000; margin-bottom:6px; height:40px;}
-.print-footer{margin-top:20px; font-size:10px; color:#555; text-align:center; border-top:1px solid #ccc; padding-top:6px;}
+@page{size:A4 portrait; margin:8mm 10mm;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Helvetica,Arial,sans-serif; color:#000; margin:0; padding:4mm; font-size:11px; line-height:1.25;}
+.print-header-table{width:100%; border:2px solid #000; border-collapse:collapse; margin-bottom:8px;}
+.print-header-table td{border:1px solid #000; padding:4px 6px; vertical-align:middle;}
+.print-logo{max-height:48px; max-width:140px; object-fit:contain;}
+.print-company{font-weight:800; font-size:13px;}
+.print-title{font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.03em;}
+.print-table{width:100%; border-collapse:collapse; margin-bottom:7px; font-size:10.5px;}
+.print-table th, .print-table td{border:1px solid #333; padding:3px 6px; text-align:left;}
+.print-table th{background:#f0f0f0; font-weight:700; width:110px;}
+.print-section-title{font-weight:800; font-size:11px; margin:7px 0 3px; text-transform:uppercase; letter-spacing:.02em;}
+.print-note{border:1px solid #333; padding:4px 6px; font-size:10.5px; min-height:28px; white-space:pre-wrap;}
+.print-signatures{display:flex; gap:20px; margin-top:14px; page-break-inside:avoid;}
+.print-sig-box{flex:1; text-align:center; font-size:10px;}
+.print-sig-line{border-top:1px solid #000; margin-bottom:4px; height:24px;}
+.print-footer{margin-top:10px; font-size:9.5px; color:#555; text-align:center; border-top:1px solid #ccc; padding-top:4px;}
+@media print{
+  html,body{background:#fff !important; margin:0 !important; padding:0 !important;}
+  .print-table, .print-header-table, .print-note, .print-signatures{page-break-inside:avoid;}
+}
 `;
 function openPrintWindow(bodyHtml, pageCss){
   let w = null;
@@ -748,11 +810,29 @@ async function fetchLogoDataUrl(){
 
 function getFaultBlockRenderers(){
   return {
-    header: (c) => `<div class="print-header">
-      ${c.logoUrl?`<img class="print-logo" src="${c.logoUrl}">`:''}
-      <div class="print-company">${esc(c.t.companyName||'')}</div>
-      <div class="print-title">Arıza Formu${c.f.trackingNo?' — '+esc(c.f.trackingNo):''}</div>
-    </div>`,
+    header: (c) => {
+      const ft = c.ft || (c.t && c.t.fault) || {};
+      const fTitle = ft.formTitle || 'ARIZA BİLDİRİM VE ONARIM FORMU';
+      const fNo = ft.formNo || 'FR-AR-01';
+      const rNo = ft.revisionNo || '01';
+      const rDate = ft.revisionDate || '01.01.2025';
+      return `<table class="print-header-table">
+        <tr>
+          <td style="width:25%; text-align:center;">
+            ${c.logoUrl ? `<img class="print-logo" src="${c.logoUrl}">` : `<div class="print-company">${esc(c.t.companyName||'')}</div>`}
+          </td>
+          <td style="width:50%; text-align:center;">
+            <div class="print-title">${esc(fTitle)}</div>
+            <div style="font-size:10px; color:#444; margin-top:2px;">Takip No: <b>${esc(c.f.trackingNo||'—')}</b></div>
+          </td>
+          <td style="width:25%; font-size:9.5px; line-height:1.4;">
+            <div><b>Form No:</b> ${esc(fNo)}</div>
+            <div><b>Rev. No:</b> ${esc(rNo)}</div>
+            <div><b>Rev. Tarihi:</b> ${esc(rDate)}</div>
+          </td>
+        </tr>
+      </table>`;
+    },
     assetInfo: (c) => c.ft.showAssetInfo ? `<table class="print-table">
       <tr><th>Takip No</th><td>${esc(c.f.trackingNo||'')}</td><th>Varlık</th><td>${esc(c.a?c.a.name:'')}</td></tr>
       <tr><th>Varlık Kodu</th><td>${esc((c.a&&c.a.assetCode)||'')}</td><th>Konum</th><td>${esc((c.a&&c.a.location)||'')}</td></tr>
@@ -782,11 +862,29 @@ function getFaultBlockRenderers(){
 
 function getMaintBlockRenderers(){
   return {
-    header: (c) => `<div class="print-header">
-      ${c.logoUrl?`<img class="print-logo" src="${c.logoUrl}">`:''}
-      <div class="print-company">${esc(c.t.companyName||'')}</div>
-      <div class="print-title">Bakım Formu${c.r.trackingNo?' — '+esc(c.r.trackingNo):''}</div>
-    </div>`,
+    header: (c) => {
+      const mt = c.mt || (c.t && c.t.maint) || {};
+      const fTitle = mt.formTitle || 'PERİYODİK BAKIM FORMU';
+      const fNo = mt.formNo || 'FR-BK-01';
+      const rNo = mt.revisionNo || '01';
+      const rDate = mt.revisionDate || '01.01.2025';
+      return `<table class="print-header-table">
+        <tr>
+          <td style="width:25%; text-align:center;">
+            ${c.logoUrl ? `<img class="print-logo" src="${c.logoUrl}">` : `<div class="print-company">${esc(c.t.companyName||'')}</div>`}
+          </td>
+          <td style="width:50%; text-align:center;">
+            <div class="print-title">${esc(fTitle)}</div>
+            <div style="font-size:10px; color:#444; margin-top:2px;">Takip No: <b>${esc(c.r.trackingNo||'—')}</b></div>
+          </td>
+          <td style="width:25%; font-size:9.5px; line-height:1.4;">
+            <div><b>Form No:</b> ${esc(fNo)}</div>
+            <div><b>Rev. No:</b> ${esc(rNo)}</div>
+            <div><b>Rev. Tarihi:</b> ${esc(rDate)}</div>
+          </td>
+        </tr>
+      </table>`;
+    },
     assetInfo: (c) => c.mt.showAssetInfo ? `<table class="print-table">
       <tr><th>Varlık</th><td>${esc(c.a?c.a.name:'')}</td><th>Varlık Kodu</th><td>${esc(c.a&&c.a.assetCode||'')}</td></tr>
       <tr><th>Seri No</th><td>${esc(c.a&&c.a.serial||'')}</td><th>Marka / Model</th><td>${esc(((c.a&&c.a.brand)||'')+' '+((c.a&&c.a.model)||''))}</td></tr>
@@ -936,14 +1034,12 @@ function tabsForRole(){
   const r = role();
   const all = [
     ['panel','📋','Panel'], ['assets','🏷️','Varlıklar'], ['groups','🗂️','Varlık Grupları'],
-    ['maint','🛠️','Bakımlar'], ['extmaint','🧰','Dış Bakım'], ['inspection','🔍','Muayene'], ['faults','⚠️','Arızalar'], ['stock','📦','Stok'],
+    ['maint','🛠️','Bakımlar'], ['extmaint','🧰','Dış Bakım'], ['inspection','🔍','Muayene'], ['calibration','📐','Kalibrasyon'], ['faults','⚠️','Arızalar'], ['stock','📦','Stok'],
     ['projects','📁','Projeler'],
     ['costs','💰','Maliyet Raporu'],
     ['settings','⚙️','Ayarlar'],
   ];
-  if(r==='Yönetici') return all;
-  if(r==='Teknisyen') return all.filter(t=>['panel','assets','maint','extmaint','inspection','faults','stock','projects'].includes(t[0]));
-  if(r==='Depo Sorumlusu') return all.filter(t=>['panel','stock','maint','extmaint','inspection','faults','assets'].includes(t[0]));
+  if(r==='Depo Sorumlusu') return all.filter(t=>['panel','stock','maint','extmaint','inspection','calibration','faults','assets'].includes(t[0]));
   return all;
 }
 function renderApp(){
@@ -982,6 +1078,7 @@ function renderTab(){
   if(currentTab==='maint') return renderMaint(el);
   if(currentTab==='extmaint') return renderExtMaint(el);
   if(currentTab==='inspection') return renderInspection(el);
+  if(currentTab==='calibration') return renderCalibration(el);
   if(currentTab==='faults') return renderFaults(el);
   if(currentTab==='stock') return renderStock(el);
   if(currentTab==='projects') return renderProjects(el);
@@ -998,7 +1095,7 @@ function renderPanel(el){
   const pending = withDue.filter(x=> daysDiff(x.due) <= 0).sort((p,q)=>p.due.localeCompare(q.due));
   const thisWeek = withDue.filter(x=> x.due>=wsStr && x.due<=weStr).sort((p,q)=>p.due.localeCompare(q.due));
   const openFaults = db.faults.filter(f=>f.status!=='Tamamlandı');
-  const lowStock = db.materials.filter(m=>m.qty<=m.minQty);
+  const lowStock = db.materials.filter(m=>m.qty < m.minQty);
   const inspGroups = computeGroupInspectionSummary(30);
   const extMaintGroups = computeGroupExtMaintSummary(30);
 
@@ -1318,6 +1415,7 @@ function renderGroups(el){
         <div class="row"><h2 style="margin:0;">${esc(g.name)}</h2><span class="badge b-accent">${g.periodDays} günde bir</span>
         ${g.inspectionEnabled?`<span class="badge b-warn">Muayene: ${g.inspectionPeriodDays} günde bir${g.inspectionBaselineDate ? ' (İlk: ' + fmtStr(g.inspectionBaselineDate) + ')' : ''}</span>`:''}
         ${g.extMaintEnabled?`<span class="badge b-warn">Dış Bakım: ${g.extMaintPeriodDays} günde bir${g.extMaintBaselineDate ? ' (İlk: ' + fmtStr(g.extMaintBaselineDate) + ')' : ''}</span>`:''}
+        ${g.calibrationEnabled?`<span class="badge b-warn">Kalibrasyon: ${g.calibrationPeriodDays} günde bir${g.calibrationBaselineDate ? ' (İlk: ' + fmtStr(g.calibrationBaselineDate) + ')' : ''}</span>`:''}
         <span class="muted mono tiny">${count} varlık</span>
         <div class="spacer"></div>
         ${editable?`<button class="ghost small" onclick="openGroupForm('${g.id}')">Düzenle</button><button class="ghost small" onclick="deleteGroup('${g.id}')">Sil</button>`:''}
@@ -1339,6 +1437,7 @@ window.openGroupForm = function(id){
   tempChecklist = g ? g.checklist.map(q=>({...q})) : [];
   const inspDateVal = (g && g.inspectionBaselineDate) ? String(g.inspectionBaselineDate).slice(0, 10) : '';
   const extDateVal = (g && g.extMaintBaselineDate) ? String(g.extMaintBaselineDate).slice(0, 10) : '';
+  const calibDateVal = (g && g.calibrationBaselineDate) ? String(g.calibrationBaselineDate).slice(0, 10) : '';
   openModal(`
     <h3>${g?'Grubu Düzenle':'Yeni Varlık Grubu'}</h3>
     <div class="grid2">
@@ -1375,6 +1474,19 @@ window.openGroupForm = function(id){
         <div class="muted tiny" style="margin-top:6px;">Bu tarih, henüz hiç dış bakımı yapılmamış varlıklar için ilk planlama tarihini belirler.</div>
       </div>
     </div>
+    <div class="panel" style="margin-top:10px; background:#fafbfa;">
+      <label style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:700;">
+        <input type="checkbox" id="m-calib-enabled" ${g&&g.calibrationEnabled?'checked':''} onchange="document.getElementById('m-calib-period-wrap').style.display=this.checked?'block':'none';">
+        Kalibrasyon — bu grubun varlıkları için ayrıca periyodik kalibrasyon gerekli
+      </label>
+      <div id="m-calib-period-wrap" style="margin-top:10px; ${g&&g.calibrationEnabled?'':'display:none;'}">
+        <div class="grid2">
+          <div class="field"><label class="f-label" for="m-calib-period">Kalibrasyon Periyodu (gün)</label><input id="m-calib-period" type="number" min="1" value="${g&&g.calibrationPeriodDays?g.calibrationPeriodDays:365}"></div>
+          <div class="field"><label class="f-label" for="m-calib-baseline">Kalibrasyon Başlangıç Tarihi</label><input id="m-calib-baseline" type="date" value="${calibDateVal}"></div>
+        </div>
+        <div class="muted tiny" style="margin-top:6px;">Bu tarih, henüz hiç kalibrasyonu yapılmamış varlıklar için ilk planlama tarihini belirler.</div>
+      </div>
+    </div>
     <div class="actions"><button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveGroup('${id||''}')">Kaydet</button></div>
   `);
   renderChecklistRows();
@@ -1382,26 +1494,50 @@ window.openGroupForm = function(id){
 function renderChecklistRows(){
   const w = document.getElementById('checklistWrap');
   w.innerHTML = tempChecklist.map((q,i)=>`
-    <div class="checklist-row"><input class="qtext" type="text" value="${esc(q.text)}" onchange="tempChecklist[${i}].text=this.value">
+    <div class="checklist-row"><input class="qtext" type="text" value="${esc(q.text)}" oninput="tempChecklist[${i}].text=this.value">
     <button class="icon" onclick="removeChecklistRow(${i})">×</button></div>
   `).join('') || `<div class="muted tiny">Henüz madde yok.</div>`;
 }
 window.addChecklistRow = function(){ tempChecklist.push({id:uid('q'), text:''}); renderChecklistRows(); };
 window.removeChecklistRow = function(i){ tempChecklist.splice(i,1); renderChecklistRows(); };
 window.saveGroup = async function(id){
-  const name = document.getElementById('m-gname').value.trim();
-  if(!name) return;
-  const periodDays = parseInt(document.getElementById('m-period').value) || 30;
-  const checklist = tempChecklist.filter(q=>q.text.trim());
-  const inspectionEnabled = document.getElementById('m-inspect-enabled').checked;
-  const inspectionPeriodDays = inspectionEnabled ? (parseInt(document.getElementById('m-inspect-period').value)||365) : null;
+  const nameEl = document.getElementById('m-gname');
+  if(!nameEl) return;
+  const name = nameEl.value.trim();
+  if(!name){ alert('Grup adı zorunludur.'); return; }
+  const periodDays = parseInt(document.getElementById('m-period')?.value) || 30;
+
+  // DOM input senkronizasyonu - doğrudan input alanlarından anlık oku
+  const inputs = document.querySelectorAll('#checklistWrap .qtext');
+  if(inputs && inputs.length){
+    tempChecklist = Array.from(inputs).map((inp, idx) => ({
+      id: (tempChecklist[idx] && tempChecklist[idx].id) || uid('q'),
+      text: inp.value.trim()
+    })).filter(q => q.text.length > 0);
+  }
+  const checklist = (tempChecklist || []).filter(q=>q && q.text && q.text.trim());
+
+  const inspectionEnabled = document.getElementById('m-inspect-enabled')?.checked || false;
+  const inspectionPeriodDays = inspectionEnabled ? (parseInt(document.getElementById('m-inspect-period')?.value)||365) : null;
   const rawInspBase = document.getElementById('m-inspect-baseline')?.value;
   const inspectionBaselineDate = inspectionEnabled && rawInspBase ? String(rawInspBase).slice(0, 10) : null;
-  const extMaintEnabled = document.getElementById('m-extmaint-enabled').checked;
-  const extMaintPeriodDays = extMaintEnabled ? (parseInt(document.getElementById('m-extmaint-period').value)||365) : null;
+
+  const extMaintEnabled = document.getElementById('m-extmaint-enabled')?.checked || false;
+  const extMaintPeriodDays = extMaintEnabled ? (parseInt(document.getElementById('m-extmaint-period')?.value)||365) : null;
   const rawExtBase = document.getElementById('m-extmaint-baseline')?.value;
   const extMaintBaselineDate = extMaintEnabled && rawExtBase ? String(rawExtBase).slice(0, 10) : null;
-  const data = {name, periodDays, checklist, inspectionEnabled, inspectionPeriodDays, inspectionBaselineDate, extMaintEnabled, extMaintPeriodDays, extMaintBaselineDate};
+
+  const calibrationEnabled = document.getElementById('m-calib-enabled')?.checked || false;
+  const calibrationPeriodDays = calibrationEnabled ? (parseInt(document.getElementById('m-calib-period')?.value)||365) : null;
+  const rawCalibBase = document.getElementById('m-calib-baseline')?.value;
+  const calibrationBaselineDate = calibrationEnabled && rawCalibBase ? String(rawCalibBase).slice(0, 10) : null;
+
+  const data = {
+    name, periodDays, checklist, 
+    inspectionEnabled, inspectionPeriodDays, inspectionBaselineDate, 
+    extMaintEnabled, extMaintPeriodDays, extMaintBaselineDate,
+    calibrationEnabled, calibrationPeriodDays, calibrationBaselineDate
+  };
   if(id){ Object.assign(group(id), data); }
   else { db.assetGroups.push({id:uid('g'), ...data}); }
   await saveDB(); closeModal(); renderTab();
@@ -1432,14 +1568,15 @@ window.renderMaintBody = function(){
   const canAdd = can('doMaintenance');
   if(maintFilter==='upcoming'){
     const q = maintQuery.trim().toLowerCase();
-    const withDue = db.assets.map(a=>({a, due: nextDueDate(a)})).filter(x=>x.due && daysDiff(x.due)<=0)
+    const withDue = db.assets.map(a=>({a, due: nextDueDate(a)})).filter(x=>x.due)
       .filter(x=>{
-        if(q && !((x.a.name+' '+x.a.location).toLowerCase().includes(q))) return false;
+        if(q && !((x.a.name+' '+(x.a.assetCode||'')+' '+x.a.location).toLowerCase().includes(q))) return false;
         if(maintFGroup && x.a.groupId!==maintFGroup) return false;
         return true;
       })
       .sort((p,q)=>p.due.localeCompare(q.due));
-    body.innerHTML = `<div class="panel">${withDue.length ? maintTableRows(withDue) : `<div class="empty">Eşleşen bekleyen bakım yok.</div>`}</div>`;
+    body.innerHTML = `<div class="row" style="margin-bottom:10px;"><div class="spacer"></div><button class="ghost small" onclick="exportMaintUpcoming()">⬇ Dışa Aktar (CSV)</button></div>
+    <div class="panel">${withDue.length ? maintTableRows(withDue) : `<div class="empty">Eşleşen planlanan bakım yok.</div>`}</div>`;
   } else {
     const q = maintHistQuery.trim().toLowerCase();
     const recs = [...db.maintenanceRecords].filter(r=>{
@@ -1448,10 +1585,11 @@ window.renderMaintBody = function(){
       return true;
     }).sort((p,q)=>q.endDate.localeCompare(p.endDate));
     body.innerHTML = `<div class="row" style="margin-bottom:10px;"><div class="spacer"></div><button class="ghost small" onclick="exportMaintHistory()">⬇ Dışa Aktar (CSV)</button></div>
-    <div class="panel">${recs.length ? `<table><thead><tr><th>Takip No</th><th>Varlık</th><th>Tip</th><th>Başlama</th><th>Bitiş</th><th>Yapan</th><th>Maliyet</th><th>Sonuç</th><th></th></tr></thead><tbody>
+    <div class="panel">${recs.length ? `<table><thead><tr><th>Takip No</th><th>Varlık</th><th>Tip</th><th>Başlama</th><th>Bitiş</th><th>Yapan</th><th>Maliyet</th><th>Belge</th><th>Sonuç</th><th></th></tr></thead><tbody>
       ${recs.map(r=>{
         const a = asset(r.assetId);
-        const notOk = r.checklistResults.filter(c=>c.result==='Uygun Değil').length;
+        const notOk = (r.checklistResults||[]).filter(c=>c.result==='Uygun Değil').length;
+        const attCount = (r.attachments||[]).length;
         return `<tr>
           <td class="mono" style="font-weight:700;">${esc(r.trackingNo||'—')}</td>
           <td style="font-weight:700;">${esc(a?a.name:'—')}</td>
@@ -1460,6 +1598,7 @@ window.renderMaintBody = function(){
           <td class="mono">${fmtStr(r.endDate)}</td>
           <td class="muted">${esc(userName(r.completedBy))}</td>
           <td class="mono">${fmtMoney(maintRecordCost(r))}</td>
+          <td>${attCount ? `<span class="badge b-ok"><span class="dot"></span>${attCount} dosya</span>` : `<span class="badge b-muted">—</span>`}</td>
           <td>${notOk? `<span class="badge b-danger"><span class="dot"></span>${notOk} sorun bulundu</span>` : `<span class="badge b-ok"><span class="dot"></span>Sorunsuz</span>`}</td>
           <td style="white-space:nowrap;">
             <button class="ghost small" onclick="printMaintRecord('${r.id}')">🖨️ Yazdır</button>
@@ -1469,9 +1608,20 @@ window.renderMaintBody = function(){
       }).join('')}</tbody></table>` : `<div class="empty">Eşleşen kayıt yok.</div>`}</div>`;
   }
 };
+window.exportMaintUpcoming = function(){
+  const headers=['Varlık Adı','Varlık Kodu','Grup','Konum','Planlanan Tarih','Kalan Gün','Durum'];
+  const withDue = db.assets.map(a=>({a, due: nextDueDate(a)})).filter(x=>x.due).sort((p,q)=>p.due.localeCompare(q.due));
+  const rows = withDue.map(x=>{
+    const g = group(x.a.groupId);
+    const dd = daysDiff(x.due);
+    const status = dd<0 ? `Gecikti (${Math.abs(dd)} gün)` : (dd===0 ? 'Bugün' : `${dd} gün kaldı`);
+    return [x.a.name, x.a.assetCode||'', g?g.name:'', x.a.location||'', fmtStr(x.due), dd, status];
+  });
+  exportCSV('planlanan-bakimlar.csv', headers, rows);
+};
 window.exportMaintHistory = function(){
-  const headers=['Takip No','Varlık','Tip','Başlama','Bitiş','Yapan','Maliyet','Not'];
-  const rows = db.maintenanceRecords.map(r=>{ const a=asset(r.assetId); return [r.trackingNo||'',a?a.name:'',r.type||'Periyodik',fmtStr(r.startDate),fmtStr(r.endDate),userName(r.completedBy),maintRecordCost(r).toFixed(2),r.notes||'']; });
+  const headers=['Takip No','Varlık','Tip','Başlama','Bitiş','Yapan','Maliyet','Belge Sayısı','Not'];
+  const rows = db.maintenanceRecords.map(r=>{ const a=asset(r.assetId); return [r.trackingNo||'',a?a.name:'',r.type||'Periyodik',fmtStr(r.startDate),fmtStr(r.endDate),userName(r.completedBy),maintRecordCost(r).toFixed(2),(r.attachments||[]).length,r.notes||'']; });
   exportCSV('bakim-gecmisi.csv', headers, rows);
 };
 window.openMaintForm = function(opts){
@@ -1483,14 +1633,18 @@ window.openMaintForm = function(opts){
   const g = a ? group(a.groupId) : null;
 
   if(editing){
-    tempChecklistResults = rec.checklistResults.map(q=>({questionId:q.questionId, text:q.text, result:q.result}));
-    tempUsedMaterials = rec.usedMaterials.map(u=>({...u}));
-    tempOriginalUsed = rec.usedMaterials.map(u=>({...u}));
+    tempChecklistResults = (rec.checklistResults||[]).map(q=>({questionId:q.questionId, text:q.text, result:q.result}));
+    tempUsedMaterials = (rec.usedMaterials||[]).map(u=>({...u}));
+    tempOriginalUsed = (rec.usedMaterials||[]).map(u=>({...u}));
+    tempMaintAttachments = (rec.attachments||[]).map(att=>({...att}));
+    maintAttachmentsToDelete = [];
   } else {
     tempChecklistResults = (g?g.checklist:[]).map(q=>({questionId:q.id, text:q.text, result:'Uygun'}));
     const spareIds = a?(a.spareParts||[]):[];
     tempUsedMaterials = spareIds.length ? [{materialId:spareIds[0], qty:0}] : [];
     tempOriginalUsed = [];
+    tempMaintAttachments = [];
+    maintAttachmentsToDelete = [];
   }
 
   openModal(`
@@ -1511,6 +1665,19 @@ window.openMaintForm = function(opts){
       <button class="ghost small" onclick="addMatRow()" style="margin-top:4px;">+ Malzeme ekle</button>
     </div>
     <div class="field" style="margin-top:12px;"><label class="f-label" for="m-maintextracost">Ek Maliyet (₺) — malzeme dışı, varsa</label><input id="m-maintextracost" type="number" step="0.01" value="${editing?(rec.extraCost||0):0}"></div>
+    <div class="field" style="margin-top:12px;"><label class="f-label">Belge &amp; Fotoğraflar (PDF / Resim / Bağlantı)</label>
+      <div id="maintAttachListWrap"></div>
+      <div class="grid2" style="margin-top:6px;">
+        <input type="file" accept="image/*" onchange="addMaintAttachFile(this,'image')">
+        <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx" onchange="addMaintAttachFile(this,'dosya')">
+      </div>
+      <div class="row" style="margin-top:6px;">
+        <input type="text" id="maint-attach-link-name" placeholder="Bağlantı adı (ör. Servis Raporu)" style="flex:1;">
+        <input type="text" id="maint-attach-link-url" placeholder="https://..." style="flex:1;">
+        <button class="ghost small" onclick="addMaintAttachLink()">+ Bağlantı Ekle</button>
+      </div>
+      <div class="muted tiny" style="margin-top:4px;">Yüklenen dosyalar 3.5 MB'ı geçmemelidir. Büyük dosyalar için bağlantı ekleyin.</div>
+    </div>
     <div class="field" style="margin-top:12px;"><label class="f-label" for="m-maintnote">Genel Not</label><textarea id="m-maintnote">${editing?esc(rec.notes||''):''}</textarea></div>
     <div class="actions">
       ${editing?`<button class="ghost" onclick="printMaintRecord('${opts.recordId}')">🖨️ Yazdır</button>`:''}
@@ -1520,7 +1687,7 @@ window.openMaintForm = function(opts){
     </div>
   `);
   if(adhoc){ comboInit('m-maintasset', db.assets.map(x=>({value:x.id,label:x.name})), db.assets[0]&&db.assets[0].id, function(){ updateAdhocChecklist(); }); }
-  renderChecklistResults(); renderMatRows();
+  renderChecklistResults(); renderMatRows(); renderMaintAttachRows();
 };
 window.updateAdhocChecklist = function(){
   const assetId = document.getElementById('m-maintasset').value;
@@ -1552,6 +1719,49 @@ window.addMatRow = function(){
   tempUsedMaterials.push({materialId:db.materials[0].id, qty:1}); renderMatRows();
 };
 window.removeMatRow = function(i){ tempUsedMaterials.splice(i,1); renderMatRows(); };
+
+function renderMaintAttachRows(){
+  const w = document.getElementById('maintAttachListWrap');
+  if(!w) return;
+  w.innerHTML = tempMaintAttachments.length ? tempMaintAttachments.map((c,i)=>`
+    <div class="cert-row">
+      <span class="cert-badge">${c.kind==='image'?'🖼️ Resim':(c.kind==='link'?'🔗 Bağlantı':'📄 Belge')}</span>
+      <span class="cert-name" title="${esc(c.name)}">${esc(c.name)}</span>
+      <span class="muted tiny">${fmtStr(c.addedDate)}</span>
+      <div class="spacer"></div>
+      ${c.kind==='link'?`<button class="ghost small" onclick="window.open('${esc(window.safeUrl?window.safeUrl(c.url):c.url)}','_blank','noopener,noreferrer')">Aç</button>`
+        : c.storageKey?`<button class="ghost small" onclick="viewCertificate('${c.storageKey}')">Görüntüle</button>`:`<span class="muted tiny">(kaydedilince yüklenecek)</span>`}
+      <button class="icon" onclick="removeMaintAttachRow(${i})">×</button>
+    </div>`).join('') : `<div class="muted tiny">Henüz belge eklenmedi.</div>`;
+}
+window.addMaintAttachFile = function(inputEl, kind){
+  const file = inputEl.files[0];
+  if(!file) return;
+  if(file.size > 3.5*1024*1024){ alert('Dosya çok büyük (3.5 MB üzeri). Daha büyük dosyalar için bağlantı seçeneğini kullanın.'); inputEl.value=''; return; }
+  const reader = new FileReader();
+  reader.onload = function(){
+    tempMaintAttachments.push({id:uid('att'), name:file.name, kind, dataUrl:reader.result, addedDate:todayStr(), file, isNew:true});
+    renderMaintAttachRows();
+    inputEl.value='';
+  };
+  reader.readAsDataURL(file);
+};
+window.addMaintAttachLink = function(){
+  const name = document.getElementById('maint-attach-link-name').value.trim();
+  const url = document.getElementById('maint-attach-link-url').value.trim();
+  if(!name || !url) return;
+  tempMaintAttachments.push({id:uid('att'), name, kind:'link', url, addedDate:todayStr(), isNew:true});
+  document.getElementById('maint-attach-link-name').value='';
+  document.getElementById('maint-attach-link-url').value='';
+  renderMaintAttachRows();
+};
+window.removeMaintAttachRow = function(i){
+  const c = tempMaintAttachments[i];
+  if(c && (c.storageKey || c.id)) maintAttachmentsToDelete.push(c.id || c.storageKey);
+  tempMaintAttachments.splice(i,1);
+  renderMaintAttachRows();
+};
+
 window.saveMaintForm = async function(recordId){
   const assetId = document.getElementById('m-maintasset').value;
   const a = asset(assetId);
@@ -1562,14 +1772,28 @@ window.saveMaintForm = async function(recordId){
   const extraCost = parseFloat(document.getElementById('m-maintextracost').value)||0;
   const checklistResults = tempChecklistResults.map(q=>({questionId:q.questionId, text:q.text, result:q.result}));
   const usedMaterials = tempUsedMaterials.filter(m=>m.qty>0).map(u=>{ const m=material(u.materialId); return {...u, unitCost: m?(m.unitCost||0):0}; });
+
+  const targetId = recordId || uid('mr');
+  for(const key of maintAttachmentsToDelete){ try{ await window.storage.delete(key, true); }catch(e){} }
+  const savedAttachments = [];
+  for(const c of tempMaintAttachments){
+    if(c.kind==='link'){ savedAttachments.push({id:c.id, name:c.name, kind:'link', url:c.url, addedDate:c.addedDate}); continue; }
+    if(c.storageKey){ savedAttachments.push({id:c.id, name:c.name, kind:c.kind, storageKey:c.storageKey, addedDate:c.addedDate}); continue; }
+    const key = `cmms-maint-att-${targetId}-${c.id}`;
+    try{
+      await window.storage.set(key, c.dataUrl, true);
+      savedAttachments.push({id:c.id, name:c.name, kind:c.kind, storageKey:key, addedDate:c.addedDate});
+    }catch(e){ alert('"'+c.name+'" kaydedilemedi, atlandı.'); }
+  }
+
   let newRecId = null;
   if(recordId){
     const rec = db.maintenanceRecords.find(r=>r.id===recordId);
     applyMaterialDelta(tempOriginalUsed, usedMaterials);
     logMaterialUsageDelta(tempOriginalUsed, usedMaterials, 'Bakım düzenleme: '+(rec.trackingNo||''), recordId);
-    Object.assign(rec, {type, startDate, endDate, checklistResults, usedMaterials, notes, extraCost});
+    Object.assign(rec, {type, startDate, endDate, checklistResults, usedMaterials, notes, extraCost, attachments:savedAttachments});
   } else {
-    const rec = {id:uid('mr'), trackingNo:nextTrackingNo('maint'), assetId, dueDate:nextDueDate(a), type, startDate, endDate, completedBy:currentUser.id, checklistResults, usedMaterials, notes, extraCost};
+    const rec = {id:targetId, trackingNo:nextTrackingNo('maint'), assetId, dueDate:nextDueDate(a), type, startDate, endDate, completedBy:currentUser.id, checklistResults, usedMaterials, notes, extraCost, attachments:savedAttachments};
     db.maintenanceRecords.push(rec);
     usedMaterials.forEach(u=>{ const m=material(u.materialId); if(m) m.qty = Math.max(0, +(m.qty-u.qty).toFixed(2)); });
     logMaterialUsageDelta([], usedMaterials, 'Bakım kullanımı: '+rec.trackingNo, rec.id);
@@ -1621,9 +1845,10 @@ window.renderInspectionBody = function(){
   if(!body) return;
   const canAdd = can('doInspection');
   if(inspectionFilter==='upcoming'){
-    let groups = computeGroupInspectionSummary(14);
+    let groups = computeGroupInspectionSummary();
     if(inspectionFGroup) groups = groups.filter(x=>x.group.id===inspectionFGroup);
-    body.innerHTML = `<div class="panel">${groups.length ? inspectionGroupRows(groups) : `<div class="empty">Yaklaşan veya gecikmiş muayene yok.</div>`}</div>`;
+    body.innerHTML = `<div class="row" style="margin-bottom:10px;"><div class="spacer"></div><button class="ghost small" onclick="exportInspectionUpcoming()">⬇ Dışa Aktar (CSV)</button></div>
+    <div class="panel">${groups.length ? inspectionGroupRows(groups) : `<div class="empty">Planlanan muayene yok.</div>`}</div>`;
   } else {
     const q = inspectionHistQuery.trim().toLowerCase();
     const recs = [...db.inspectionRecords].filter(r=>{
@@ -1648,6 +1873,19 @@ window.renderInspectionBody = function(){
         </tr>`;
       }).join('')}</tbody></table>` : `<div class="empty">Eşleşen kayıt yok.</div>`}</div>`;
   }
+};
+window.exportInspectionUpcoming = function(){
+  const headers = ['Grup Adı', 'Varlık Adı', 'Varlık Kodu', 'Konum', 'Planlanan Muayene Tarihi', 'Kalan Gün', 'Durum'];
+  const rows = [];
+  const groups = computeGroupInspectionSummary();
+  groups.forEach(g => {
+    g.withDue.forEach(item => {
+      const dd = daysDiff(item.due);
+      const status = dd < 0 ? `Gecikti (${Math.abs(dd)} gün)` : (dd === 0 ? 'Bugün' : `${dd} gün kaldı`);
+      rows.push([g.group.name, item.a.name, item.a.assetCode||'', item.a.location||'', fmtStr(item.due), dd, status]);
+    });
+  });
+  exportCSV('planlanan-muayeneler.csv', headers, rows);
 };
 window.exportInspectionHistory = function(){
   const headers=['Takip No','Grup','Kapsanan Varlıklar','Taşeron','Başlama','Bitiş','Ücret','Sertifika Sayısı','Not'];
@@ -1875,9 +2113,10 @@ window.renderExtMaintBody = function(){
   if(!body) return;
   const canAdd = can('doExtMaint');
   if(extMaintFilter==='upcoming'){
-    let groups = computeGroupExtMaintSummary(14);
+    let groups = computeGroupExtMaintSummary();
     if(extMaintFGroup) groups = groups.filter(x=>x.group.id===extMaintFGroup);
-    body.innerHTML = `<div class="panel">${groups.length ? extMaintGroupRows(groups) : `<div class="empty">Yaklaşan veya gecikmiş dış bakım yok.</div>`}</div>`;
+    body.innerHTML = `<div class="row" style="margin-bottom:10px;"><div class="spacer"></div><button class="ghost small" onclick="exportExtMaintUpcoming()">⬇ Dışa Aktar (CSV)</button></div>
+    <div class="panel">${groups.length ? extMaintGroupRows(groups) : `<div class="empty">Planlanan dış bakım yok.</div>`}</div>`;
   } else {
     const q = extMaintHistQuery.trim().toLowerCase();
     const recs = [...db.extMaintRecords].filter(r=>{
@@ -1902,6 +2141,19 @@ window.renderExtMaintBody = function(){
         </tr>`;
       }).join('')}</tbody></table>` : `<div class="empty">Eşleşen kayıt yok.</div>`}</div>`;
   }
+};
+window.exportExtMaintUpcoming = function(){
+  const headers = ['Grup Adı', 'Varlık Adı', 'Varlık Kodu', 'Konum', 'Planlanan Dış Bakım Tarihi', 'Kalan Gün', 'Durum'];
+  const rows = [];
+  const groups = computeGroupExtMaintSummary();
+  groups.forEach(g => {
+    g.withDue.forEach(item => {
+      const dd = daysDiff(item.due);
+      const status = dd < 0 ? `Gecikti (${Math.abs(dd)} gün)` : (dd === 0 ? 'Bugün' : `${dd} gün kaldı`);
+      rows.push([g.group.name, item.a.name, item.a.assetCode||'', item.a.location||'', fmtStr(item.due), dd, status]);
+    });
+  });
+  exportCSV('planlanan-dis-bakimlar.csv', headers, rows);
 };
 window.exportExtMaintHistory = function(){
   const headers=['Takip No','Grup','Kapsanan Varlıklar','Taşeron','Başlama','Bitiş','Ücret','Dosya Sayısı','Not'];
@@ -2042,6 +2294,276 @@ window.saveExtMaintForm = async function(recordId){
     openModal(`<h3>Dış Bakım Kaydedildi</h3><p style="font-size:13px; color:var(--ink-soft);">${esc(rec.trackingNo)} numaralı dış bakım kaydı ${assetIds.length} varlık için oluşturuldu.</p>
       <div class="actions"><button class="primary" onclick="closeModal()">Kapat</button></div>`);
   }
+};
+
+// ================= KALİBRASYON =================
+function calibrationGroupRows(list){
+  return `<table><thead><tr><th>Grup</th><th>Yakın / Geciken Varlık</th><th>En Yakın Tarih</th><th></th></tr></thead><tbody>
+  ${list.map(x=>{
+    const earliest = x.dueSoon[0];
+    const dd = daysDiff(earliest.due);
+    const cls = dd<0?'b-danger':(dd<=30?'b-warn':'b-accent');
+    return `<tr>
+      <td style="font-weight:700;">${esc(x.group.name)}</td>
+      <td class="muted">${x.dueSoon.length} / ${x.assets.length} varlık</td>
+      <td class="mono"><span class="badge ${cls}"><span class="dot"></span>${fmtStr(earliest.due)}${dd<0?' (gecikti)':''}</span></td>
+      <td>${can('doCalibration')?`<button class="ghost small" onclick="openCalibrationForm({groupId:'${x.group.id}'})">Kalibrasyon Kaydet</button>`:''}</td>
+    </tr>`;
+  }).join('')}
+  </tbody></table>`;
+}
+function renderCalibration(el){
+  const canAdd = can('doCalibration');
+  el.innerHTML = `<div class="topbar"><div><h1>Kalibrasyon</h1><div class="sub">Ölçüm cihazları, sensörler ve ekipmanların periyodik kalibrasyon ve doğrulama takibi</div></div>
+    ${canAdd?`<button class="accent" onclick="openCalibrationForm({groupId:null})">+ Kalibrasyon Kaydı Ekle</button>`:''}</div>
+    <div class="tabs">
+      <button class="${calibrationFilter==='upcoming'?'active':''}" onclick="calibrationFilter='upcoming'; renderTab();">Planlanan</button>
+      <button class="${calibrationFilter==='history'?'active':''}" onclick="calibrationFilter='history'; renderTab();">Geçmiş Kayıtlar</button>
+    </div>
+    ${calibrationFilter==='upcoming'?`<div class="filterbar">
+      <select onchange="calibrationFGroup=this.value; renderCalibrationBody();"><option value="">Tüm Gruplar</option>${(db.assetGroups||[]).filter(g=>g.calibrationEnabled).map(g=>`<option value="${g.id}" ${calibrationFGroup===g.id?'selected':''}>${esc(g.name)}</option>`).join('')}</select>
+    </div>`:`<div class="filterbar">
+      <input type="text" id="calibHistSearch" value="${esc(calibrationHistQuery)}" placeholder="Ara: takip no, grup, firma/laboratuvar..." oninput="calibrationHistQuery=this.value; renderCalibrationBody();">
+    </div>`}
+    <div id="calibrationBody"></div>`;
+  renderCalibrationBody();
+}
+window.renderCalibrationBody = function(){
+  const body = document.getElementById('calibrationBody');
+  if(!body) return;
+  const canAdd = can('doCalibration');
+  if(calibrationFilter==='upcoming'){
+    let groups = computeGroupCalibrationSummary();
+    if(calibrationFGroup) groups = groups.filter(x=>x.group.id===calibrationFGroup);
+    body.innerHTML = `<div class="row" style="margin-bottom:10px;"><div class="spacer"></div><button class="ghost small" onclick="exportCalibrationUpcoming()">⬇ Dışa Aktar (CSV)</button></div>
+    <div class="panel">${groups.length ? calibrationGroupRows(groups) : `<div class="empty">Planlanan kalibrasyon yok.</div>`}</div>`;
+  } else {
+    const q = calibrationHistQuery.trim().toLowerCase();
+    const recs = [...(db.calibrationRecords||[])].filter(r=>{
+      if(q){ const g=group(r.groupId); const hay=[r.trackingNo,g?g.name:'',r.contractor||''].join(' ').toLowerCase(); if(!hay.includes(q)) return false; }
+      return true;
+    }).sort((p,q)=>q.endDate.localeCompare(p.endDate));
+    body.innerHTML = `<div class="row" style="margin-bottom:10px;"><div class="spacer"></div><button class="ghost small" onclick="exportCalibrationHistory()">⬇ Dışa Aktar (CSV)</button></div>
+    <div class="panel">${recs.length ? `<table><thead><tr><th>Takip No</th><th>Grup</th><th>Kapsanan Varlık</th><th>Firma / Lab</th><th>Başlama</th><th>Bitiş</th><th>Ücret</th><th>Sertifika</th><th></th></tr></thead><tbody>
+      ${recs.map(r=>{
+        const g = group(r.groupId);
+        const names = (r.assetIds||[]).map(id=>{ const a=asset(id); return a?a.name:null; }).filter(Boolean);
+        const certCount = (r.certificates||[]).length;
+        return `<tr>
+          <td class="mono" style="font-weight:700;">${esc(r.trackingNo||'—')}</td>
+          <td style="font-weight:700;">${esc(g?g.name:'—')}</td>
+          <td class="muted tiny" title="${esc(names.join(', '))}">${names.length} varlık${names.length?': '+esc(names.slice(0,2).join(', '))+(names.length>2?'...':''):''}</td>
+          <td class="muted">${esc(r.contractor||'—')}</td>
+          <td class="mono">${fmtStr(r.startDate)}</td>
+          <td class="mono">${fmtStr(r.endDate)}</td>
+          <td class="mono">${fmtMoney(r.serviceCost)}</td>
+          <td>${certCount?`<span class="badge b-ok"><span class="dot"></span>${certCount} dosya</span>`:`<span class="badge b-warn"><span class="dot"></span>Yok</span>`}</td>
+          <td>${canAdd?`<button class="ghost small" onclick="openCalibrationForm({recordId:'${r.id}'})">Düzenle</button>`:''}</td>
+        </tr>`;
+      }).join('')}</tbody></table>` : `<div class="empty">Eşleşen kayıt yok.</div>`}</div>`;
+  }
+};
+window.exportCalibrationUpcoming = function(){
+  const headers = ['Grup Adı', 'Varlık Adı', 'Varlık Kodu', 'Konum', 'Planlanan Kalibrasyon Tarihi', 'Kalan Gün', 'Durum'];
+  const rows = [];
+  const groups = computeGroupCalibrationSummary();
+  groups.forEach(g => {
+    g.withDue.forEach(item => {
+      const dd = daysDiff(item.due);
+      const status = dd < 0 ? `Gecikti (${Math.abs(dd)} gün)` : (dd === 0 ? 'Bugün' : `${dd} gün kaldı`);
+      rows.push([g.group.name, item.a.name, item.a.assetCode||'', item.a.location||'', fmtStr(item.due), dd, status]);
+    });
+  });
+  exportCSV('planlanan-kalibrasyonlar.csv', headers, rows);
+};
+window.exportCalibrationHistory = function(){
+  const headers=['Takip No','Grup','Kapsanan Varlıklar','Firma / Lab','Başlama','Bitiş','Ücret','Sertifika Sayısı','Not'];
+  const rows = (db.calibrationRecords||[]).map(r=>{
+    const g=group(r.groupId);
+    const names = (r.assetIds||[]).map(id=>{ const a=asset(id); return a?a.name:null; }).filter(Boolean).join(', ');
+    return [r.trackingNo||'',g?g.name:'',names,r.contractor||'',fmtStr(r.startDate),fmtStr(r.endDate),(r.serviceCost||0).toFixed(2),(r.certificates||[]).length,r.notes||''];
+  });
+  exportCSV('kalibrasyon-gecmisi.csv', headers, rows);
+};
+window.openCalibrationForm = function(opts){
+  const editing = !!opts.recordId;
+  const rec = editing ? (db.calibrationRecords||[]).find(r=>r.id===opts.recordId) : null;
+  const capableGroups = (db.assetGroups||[]).filter(g=>g.calibrationEnabled);
+  if(!capableGroups.length){ alert('Hiçbir varlık grubunda kalibrasyon aktif değil. Önce Varlık Grupları\'ndan bir grup için kalibrasyonu etkinleştirin.'); return; }
+  const initGroupId = editing ? rec.groupId : (opts.groupId || capableGroups[0].id);
+
+  if(editing){ tempCalibrationAssetIds = [...(rec.assetIds||[])]; }
+  else {
+    const groupAssets = db.assets.filter(a=>a.groupId===initGroupId);
+    const dueAssets = groupAssets.filter(a=>{ const due=nextCalibrationDue(a); return due && daysDiff(due)<=30; });
+    tempCalibrationAssetIds = (dueAssets.length?dueAssets:groupAssets).map(a=>a.id);
+  }
+  tempCalibrationCertificates = editing ? (rec.certificates||[]).map(c=>({...c})) : [];
+  calibCertsToDelete = [];
+
+  openModal(`
+    <h3>${editing?'Kalibrasyon Kaydını Düzenle':'Kalibrasyonu Kaydet'}${editing&&rec.trackingNo?' — '+esc(rec.trackingNo):''}</h3>
+    <div class="field"><label class="f-label">Varlık Grubu</label>
+      <select id="m-calibgroup" onchange="updateCalibrationGroupAssets(this.value)" ${editing?'disabled':''}>
+        ${capableGroups.map(g=>`<option value="${g.id}" ${initGroupId===g.id?'selected':''}>${esc(g.name)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field" style="margin-top:10px;"><label class="f-label">Kapsanan Varlıklar</label>
+      <div id="calibAssetChecklist" style="max-height:180px; overflow-y:auto; border:1px solid var(--line); border-radius:8px; padding:8px;"></div>
+    </div>
+    <div class="grid2" style="margin-top:10px;">
+      <div class="field"><label class="f-label" for="m-calibcontractor">Kalibrasyon Laboratuvarı / Firma</label><input id="m-calibcontractor" type="text" value="${editing?esc(rec.contractor||''):''}" placeholder="TSE, akredite laboratuvar veya servis"></div>
+      <div class="field"></div>
+    </div>
+    <div class="grid2" style="margin-top:10px;">
+      <div class="field"><label class="f-label" for="m-calibstart">Başlangıç Tarihi</label><input id="m-calibstart" type="date" value="${editing?rec.startDate:todayStr()}"></div>
+      <div class="field"><label class="f-label" for="m-calibend">Bitiş Tarihi</label><input id="m-calibend" type="date" value="${editing?rec.endDate:todayStr()}"></div>
+    </div>
+    <div class="field" style="margin-top:10px;"><label class="f-label" for="m-calibcost">Kalibrasyon Maliyeti (₺)</label><input id="m-calibcost" type="number" step="0.01" value="${editing?(rec.serviceCost||0):0}"></div>
+    <div class="field" style="margin-top:12px;"><label class="f-label">Sertifikalar &amp; Raporlar (PDF / Resim)</label>
+      <div id="calibCertListWrap"></div>
+      <div class="grid2" style="margin-top:6px;">
+        <input type="file" accept="image/*" onchange="addCalibCertFile(this,'image')">
+        <input type="file" accept=".pdf" onchange="addCalibCertFile(this,'dosya')">
+      </div>
+      <div class="row" style="margin-top:6px;">
+        <input type="text" id="calib-link-name" placeholder="Bağlantı adı (ör. Kalibrasyon Sertifikası)" style="flex:1;">
+        <input type="text" id="calib-link-url" placeholder="https://..." style="flex:1;">
+        <button class="ghost small" onclick="addCalibCertLink()">+ Bağlantı Ekle</button>
+      </div>
+      <div class="muted tiny" style="margin-top:4px;">Yüklenen dosyalar 3.5 MB'ı geçmemelidir. Büyük raporlar için bağlantı ekleyin.</div>
+    </div>
+    <div class="field" style="margin-top:12px;"><label class="f-label" for="m-calibnote">Not</label><textarea id="m-calibnote">${editing?esc(rec.notes||''):''}</textarea></div>
+    <div class="actions">
+      ${editing?`<button class="danger" style="margin-right:auto;" onclick="deleteCalibration('${rec.id}')">Sil</button>`:''}
+      <button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveCalibrationForm('${editing?opts.recordId:''}')">${editing?'Kaydet':'Kalibrasyonu Kaydet'}</button>
+    </div>
+  `);
+  renderCalibrationAssetChecklist(initGroupId);
+  renderCalibCertRows();
+};
+window.updateCalibrationGroupAssets = function(groupId){
+  const groupAssets = db.assets.filter(a=>a.groupId===groupId);
+  const dueAssets = groupAssets.filter(a=>{ const due=nextCalibrationDue(a); return due && daysDiff(due)<=30; });
+  tempCalibrationAssetIds = (dueAssets.length?dueAssets:groupAssets).map(a=>a.id);
+  renderCalibrationAssetChecklist(groupId);
+};
+function renderCalibrationAssetChecklist(groupId){
+  const w = document.getElementById('calibAssetChecklist');
+  if(!w) return;
+  const groupAssets = db.assets.filter(a=>a.groupId===groupId);
+  if(!groupAssets.length){ w.innerHTML = '<div class="muted tiny">Bu grupta varlık yok.</div>'; return; }
+  const rows = groupAssets.map(function(a){
+    const due = nextCalibrationDue(a);
+    const dd = due ? daysDiff(due) : null;
+    let extra = a.location ? ('· '+esc(a.location)) : '';
+    if(due) extra += ' · '+fmtStr(due)+(dd<0?' (gecikti)':'');
+    return '<label style="display:flex; align-items:center; gap:8px; padding:4px 0; font-size:13px;">'
+      + '<input type="checkbox" '+(tempCalibrationAssetIds.includes(a.id)?'checked':'')+' onchange="toggleCalibrationAsset(\''+a.id+'\', this.checked)">'
+      + esc(a.name) + ' <span class="muted tiny">'+extra+'</span></label>';
+  }).join('');
+  const allChecked = groupAssets.every(a=>tempCalibrationAssetIds.includes(a.id));
+  w.innerHTML = '<label style="display:block; margin-bottom:6px; font-size:12px; font-weight:700; color:var(--accent); cursor:pointer;">'
+    + '<input type="checkbox" '+(allChecked?'checked':'')+' onchange="toggleAllCalibrationAssets(\''+groupId+'\', this.checked)"> Tümünü Seç / Kaldır</label>'
+    + rows;
+}
+window.toggleCalibrationAsset = function(assetId, checked){
+  if(checked){ if(!tempCalibrationAssetIds.includes(assetId)) tempCalibrationAssetIds.push(assetId); }
+  else { tempCalibrationAssetIds = tempCalibrationAssetIds.filter(id=>id!==assetId); }
+};
+window.toggleAllCalibrationAssets = function(groupId, checked){
+  const groupAssets = db.assets.filter(a=>a.groupId===groupId);
+  if(checked){ groupAssets.forEach(a=>{ if(!tempCalibrationAssetIds.includes(a.id)) tempCalibrationAssetIds.push(a.id); }); }
+  else { const ids = groupAssets.map(a=>a.id); tempCalibrationAssetIds = tempCalibrationAssetIds.filter(id=>!ids.includes(id)); }
+  renderCalibrationAssetChecklist(groupId);
+};
+function renderCalibCertRows(){
+  const w = document.getElementById('calibCertListWrap');
+  if(!w) return;
+  w.innerHTML = tempCalibrationCertificates.length ? tempCalibrationCertificates.map((c,i)=>`
+    <div class="cert-row">
+      <span class="cert-badge">${c.kind==='image'?'🖼️ Resim':(c.kind==='link'?'🔗 Bağlantı':'📄 Belge')}</span>
+      <span class="cert-name" title="${esc(c.name)}">${esc(c.name)}</span>
+      <span class="muted tiny">${fmtStr(c.addedDate)}</span>
+      <div class="spacer"></div>
+      ${c.kind==='link'?`<button class="ghost small" onclick="window.open('${esc(window.safeUrl?window.safeUrl(c.url):c.url)}','_blank','noopener,noreferrer')">Aç</button>`
+        : c.storageKey?`<button class="ghost small" onclick="viewCertificate('${c.storageKey}')">Görüntüle</button>`:`<span class="muted tiny">(kaydedilince yüklenecek)</span>`}
+      <button class="icon" onclick="removeCalibCertRow(${i})">×</button>
+    </div>`).join('') : `<div class="muted tiny">Henüz sertifika eklenmedi.</div>`;
+}
+window.addCalibCertFile = function(inputEl, kind){
+  const file = inputEl.files[0];
+  if(!file) return;
+  if(file.size > 3.5*1024*1024){ alert('Dosya çok büyük (3.5 MB üzeri). Daha büyük belgeler için bağlantı ekleyin.'); inputEl.value=''; return; }
+  const reader = new FileReader();
+  reader.onload = function(){
+    tempCalibrationCertificates.push({id:uid('cert'), name:file.name, kind, dataUrl:reader.result, addedDate:todayStr(), file, isNew:true});
+    renderCalibCertRows();
+    inputEl.value='';
+  };
+  reader.readAsDataURL(file);
+};
+window.addCalibCertLink = function(){
+  const name = document.getElementById('calib-link-name').value.trim();
+  const url = document.getElementById('calib-link-url').value.trim();
+  if(!name || !url) return;
+  tempCalibrationCertificates.push({id:uid('cert'), name, kind:'link', url, addedDate:todayStr(), isNew:true});
+  document.getElementById('calib-link-name').value='';
+  document.getElementById('calib-link-url').value='';
+  renderCalibCertRows();
+};
+window.removeCalibCertRow = function(i){
+  const c = tempCalibrationCertificates[i];
+  if(c && c.storageKey) calibCertsToDelete.push(c.storageKey);
+  tempCalibrationCertificates.splice(i,1);
+  renderCalibCertRows();
+};
+window.saveCalibrationForm = async function(recordId){
+  const groupId = document.getElementById('m-calibgroup').value;
+  const assetIds = [...tempCalibrationAssetIds];
+  if(!assetIds.length){ alert('En az bir varlık seçmelisiniz.'); return; }
+  const contractor = document.getElementById('m-calibcontractor').value.trim();
+  const startDate = document.getElementById('m-calibstart').value || todayStr();
+  const endDate = document.getElementById('m-calibend').value || todayStr();
+  const notes = document.getElementById('m-calibnote').value.trim();
+  const serviceCost = parseFloat(document.getElementById('m-calibcost').value)||0;
+
+  const targetId = recordId || uid('cal');
+  for(const key of calibCertsToDelete){ try{ await window.storage.delete(key, true); }catch(e){} }
+  const savedCerts = [];
+  for(const c of tempCalibrationCertificates){
+    if(c.kind==='link'){ savedCerts.push({id:c.id, name:c.name, kind:'link', url:c.url, addedDate:c.addedDate}); continue; }
+    if(c.storageKey){ savedCerts.push({id:c.id, name:c.name, kind:c.kind, storageKey:c.storageKey, addedDate:c.addedDate}); continue; }
+    const key = `cmms-calibcert-${targetId}-${c.id}`;
+    try{
+      await window.storage.set(key, c.dataUrl, true);
+      savedCerts.push({id:c.id, name:c.name, kind:c.kind, storageKey:key, addedDate:c.addedDate});
+    }catch(e){ alert('"'+c.name+'" kaydedilemedi, atlandı.'); }
+  }
+
+  let newRecId = null;
+  db.calibrationRecords = db.calibrationRecords || [];
+  if(recordId){
+    const rec = db.calibrationRecords.find(r=>r.id===recordId);
+    if(rec) Object.assign(rec, {groupId, assetIds, contractor, startDate, endDate, notes, serviceCost, certificates:savedCerts});
+  } else {
+    const rec = {id:targetId, trackingNo:nextTrackingNo('calibration'), groupId, assetIds, contractor, startDate, endDate, notes, serviceCost, certificates:savedCerts, completedBy:currentUser.id};
+    db.calibrationRecords.push(rec);
+    newRecId = rec.id;
+  }
+  assetIds.forEach(id=>recalcAssetLastCalibration(id));
+  await saveDB(); closeModal(); renderTab();
+  if(newRecId){
+    const rec = db.calibrationRecords.find(r=>r.id===newRecId);
+    openModal(`<h3>Kalibrasyon Kaydedildi</h3><p style="font-size:13px; color:var(--ink-soft);">${esc(rec.trackingNo)} numaralı kalibrasyon kaydı ${assetIds.length} varlık için oluşturuldu.</p>
+      <div class="actions"><button class="primary" onclick="closeModal()">Kapat</button></div>`);
+  }
+};
+window.deleteCalibration = function(id){
+  confirmDelete('Bu kalibrasyon kaydını silmek istediğinize emin misiniz?', async ()=>{
+    db.calibrationRecords = (db.calibrationRecords||[]).filter(r=>r.id!==id);
+    await saveDB(); closeModal(); renderTab();
+  });
 };
 
 // ================= ARIZALAR =================
@@ -2260,7 +2782,7 @@ function renderStock(el){
   else if(stockTab==='needs') renderStockNeeds(body, editable);
   else if(stockTab==='purchases') renderStockPurchases(body, editable);
   else if(stockTab==='suppliers') renderStockSuppliers(body, editable);
-  else renderStockMovements(body);
+  else renderStockMovements(body, editable);
 }
 function renderStockMaterials(body, editable){
   body.innerHTML = `<div class="row" style="margin-bottom:10px;"><div class="spacer"></div><button class="ghost small" onclick="exportMaterials()">⬇ Dışa Aktar (CSV)</button>${editable?`<button class="accent" onclick="openMaterialForm()">+ Yeni Malzeme</button>`:''}</div>
@@ -2272,12 +2794,12 @@ function renderStockMaterials(body, editable){
   ${db.materials.filter(m=>{
     const q = stockMatQuery.trim().toLowerCase();
     if(q && !m.name.toLowerCase().includes(q)) return false;
-    const low = m.qty<=m.minQty;
+    const low = m.qty < m.minQty;
     if(stockMatFStatus==='kritik' && !low) return false;
     if(stockMatFStatus==='yeterli' && low) return false;
     return true;
   }).map(m=>{
-    const low = m.qty<=m.minQty;
+    const low = m.qty < m.minQty;
     const sup = m.defaultSupplierId ? supplier(m.defaultSupplierId) : null;
     return `<tr>
       <td style="font-weight:700;">${esc(m.name)}</td>
@@ -2347,7 +2869,7 @@ window.saveStockAdjust = async function(materialId, type){
 
 function getAutoLowStockNeeds(){
   return db.materials.filter(m=>{
-    if(m.qty > m.minQty) return false;
+    if(m.qty >= m.minQty) return false;
     const hasActive = db.needsList.some(n=> n.materialId===m.id && n.status!=='Alındı');
     return !hasActive;
   }).map(m=>({
@@ -2481,7 +3003,10 @@ function renderStockPurchases(body, editable){
       <td class="muted">${proj?esc(proj.name):'—'}</td>
       <td class="mono">${fmtStr(p.date)}</td>
       <td class="muted">${esc(userName(p.buyerId))}</td>
-      <td>${editable?`<button class="ghost small" onclick="openPurchaseForm(null,'${p.id}')">Düzenle</button>`:''}</td>
+      <td style="white-space:nowrap;">
+        ${editable?`<button class="ghost small" onclick="openPurchaseForm(null,'${p.id}')">Düzenle</button>
+        <button class="icon" title="Satın Almayı Sil" onclick="deletePurchase('${p.id}')">×</button>`:''}
+      </td>
     </tr>`;
   }).join('') || `<tr><td colspan="9"><div class="empty">Eşleşen kayıt yok.</div></td></tr>`}
   </tbody></table></div>`;
@@ -2508,7 +3033,10 @@ window.openPurchaseForm = function(prefill, editId){
     <div class="field" style="margin-top:10px;"><label class="f-label" for="m-psupplier">Tedarikçi Adı (kayıtlı değilse elle yazın)</label><input id="m-psupplier" type="text" value="${editingP?esc(editingP.supplier||''):''}"></div>
     <div class="field" style="margin-top:10px;"><label class="f-label">Proje (opsiyonel)</label>${comboHtml('m-pproject','Proje ara (varsa bağlayın)...')}</div>
     <div class="field" style="margin-top:10px;"><label class="f-label" for="m-pnote">Not</label><input id="m-pnote" type="text" value="${editingP?esc(editingP.note||''):''}"></div>
-    <div class="actions"><button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="savePurchase('${prefill&&prefill.needId?prefill.needId:''}','${editId||''}')">Kaydet</button></div>`);
+    <div class="actions">
+      ${editingP ? `<button class="danger" style="margin-right:auto;" onclick="deletePurchase('${editId}')">Sil</button>` : ''}
+      <button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="savePurchase('${prefill&&prefill.needId?prefill.needId:''}','${editId||''}')">Kaydet</button>
+    </div>`);
   comboInit('m-pproject', [{value:'',label:'— Yok —'}].concat(db.projects.map(pr=>({value:pr.id,label:pr.name,sub:pr.trackingNo}))), editingP?(editingP.projectId||''):'');
   const initMatId = editingP?editingP.materialId:(prefill&&prefill.materialId?prefill.materialId:(db.materials[0]&&db.materials[0].id));
   comboInit('m-pmat', db.materials.map(m=>({value:m.id,label:m.name})), initMatId, function(val){
@@ -2551,6 +3079,19 @@ window.savePurchase = async function(needId, editId){
     if(needId){ const need = db.needsList.find(n=>n.id===needId); if(need) need.status='Alındı'; }
   }
   await saveDB(); closeModal(); renderTab();
+};
+window.deletePurchase = function(id){
+  const p = db.purchases.find(x=>x.id===id);
+  if(!p) return;
+  confirmDelete('Bu satın alma kaydını silmek istediğinize emin misiniz? Malzeme stoğu satın alma miktarı kadar azaltılacaktır.', async ()=>{
+    const mat = material(p.materialId);
+    if(mat){
+      mat.qty = Math.max(0, +(mat.qty - p.qty).toFixed(2));
+    }
+    db.stockMovements = (db.stockMovements||[]).filter(mv => mv.refPurchaseId !== id);
+    db.purchases = db.purchases.filter(x => x.id !== id);
+    await saveDB(); closeModal(); renderTab();
+  });
 };
 
 function renderStockSuppliers(body, editable){
@@ -2606,12 +3147,12 @@ window.deleteSupplier = function(id){
   });
 };
 
-function renderStockMovements(body){
+function renderStockMovements(body, editable){
   body.innerHTML = `<div class="filterbar">
     <input type="text" id="movSearch" value="${esc(movQuery)}" placeholder="Malzeme ara..." oninput="movQuery=this.value; refilterStock('movSearch');">
     <select onchange="movFType=this.value; renderTab();"><option value="">Tüm Tipler</option><option ${movFType==='Giriş'?'selected':''}>Giriş</option><option ${movFType==='Çıkış'?'selected':''}>Çıkış</option></select>
   </div>
-  <div class="panel"><table><thead><tr><th>Tarih</th><th>Malzeme</th><th>Tip</th><th>Miktar</th><th>Kullanıcı</th><th>Sebep</th></tr></thead><tbody>
+  <div class="panel"><table><thead><tr><th>Tarih</th><th>Malzeme</th><th>Tip</th><th>Miktar</th><th>Kullanıcı</th><th>Sebep</th><th></th></tr></thead><tbody>
   ${[...db.stockMovements].filter(mv=>{
     const q = movQuery.trim().toLowerCase();
     if(q){ const m=material(mv.materialId); if(!m || !m.name.toLowerCase().includes(q)) return false; }
@@ -2626,10 +3167,29 @@ function renderStockMovements(body){
       <td class="mono">${mv.qty} ${m?esc(m.unit):''}</td>
       <td class="muted">${esc(userName(mv.userId))}</td>
       <td class="muted">${esc(mv.reason||'')}</td>
+      <td style="white-space:nowrap;">
+        ${editable?`<button class="icon" title="Hareketi Sil ve Stoğu Geri Al" onclick="deleteStockMovement('${mv.id}')">×</button>`:''}
+      </td>
     </tr>`;
-  }).join('') || `<tr><td colspan="6"><div class="empty">Eşleşen kayıt yok.</div></td></tr>`}
+  }).join('') || `<tr><td colspan="7"><div class="empty">Eşleşen kayıt yok.</div></td></tr>`}
   </tbody></table></div>`;
 }
+window.deleteStockMovement = function(id){
+  const mv = (db.stockMovements||[]).find(m=>m.id===id);
+  if(!mv) return;
+  confirmDelete('Bu stok hareketini silmek istediğinize emin misiniz? Malzeme stoğu işlem tipine göre geri alınacaktır.', async ()=>{
+    const m = material(mv.materialId);
+    if(m){
+      if(mv.type==='Giriş'){
+        m.qty = Math.max(0, +(m.qty - mv.qty).toFixed(2));
+      } else if(mv.type==='Çıkış'){
+        m.qty = +(m.qty + mv.qty).toFixed(2);
+      }
+    }
+    db.stockMovements = (db.stockMovements||[]).filter(x=>x.id!==id);
+    await saveDB(); renderTab();
+  });
+};
 
 // ================= KULLANICILAR =================
 function renderUsers(el){
@@ -2676,16 +3236,17 @@ window.saveUser = async function(id){
 
 // ================= PROJELER =================
 function projectPurchasesCost(projectId){
-  return db.purchases.filter(p=>p.projectId===projectId).reduce((s,p)=>s+(p.totalPrice||0),0);
+  return (db && db.purchases ? db.purchases : []).filter(p=>p && p.projectId===projectId).reduce((s,p)=>s+(p.totalPrice||0),0);
 }
 function projectTasksCost(project){
-  return (project.tasks||[]).reduce((s,t)=>s+(t.cost||0),0);
+  return (project && project.tasks ? project.tasks : []).reduce((s,t)=>s+(t.cost||0),0);
 }
 function projectTotalCost(project){
-  return projectPurchasesCost(project.id) + projectTasksCost(project);
+  return projectPurchasesCost(project ? project.id : null) + projectTasksCost(project);
 }
 function renderProjects(el){
-  if(currentProjectId){ renderProjectDetail(el); return; }
+  const activeId = currentProjectId || window.currentProjectId;
+  if(activeId){ renderProjectDetail(el); return; }
   renderProjectsList(el);
 }
 function renderProjectsList(el){
@@ -2722,7 +3283,10 @@ window.renderProjectsTable = function(){
       <td class="muted">${esc(userName(p.ownerUserId))}</td>
       <td class="mono">${p.targetEndDate?fmtStr(p.targetEndDate):'—'}</td>
       ${editable?`<td class="mono">${fmtMoney(p.budgetAmount)}</td><td class="mono">${fmtMoney(spent)}</td>`:''}
-      <td><button class="ghost small" onclick="openProjectDetail('${p.id}')">Aç</button></td>
+      <td>
+        <button class="ghost small" onclick="openProjectDetail('${p.id}')">Aç</button>
+        ${editable?`<button class="ghost small" style="color:var(--danger); margin-left:4px;" onclick="deleteProject('${p.id}')">Sil</button>`:''}
+      </td>
     </tr>`;
   }).join('') || `<tr><td colspan="${editable?9:7}"><div class="empty">Eşleşen proje yok.</div></td></tr>`}
   </tbody></table>`;
@@ -2782,18 +3346,47 @@ window.deleteProject = function(id){
     await saveDB(); renderTab();
   });
 };
-window.openProjectDetail = function(id){ currentProjectId=id; projectDetailTab='genel'; renderTab(); };
-window.backToProjects = function(){ currentProjectId=null; renderTab(); };
+window.openProjectDetail = async function(id){
+  currentProjectId=id;
+  window.currentProjectId=id;
+  projectDetailTab='genel';
+  window.projectDetailTab='genel';
+  renderTab();
+  if (window.API && typeof API.getProject === 'function') {
+    try {
+      const detail = await API.getProject(id);
+      if (detail && window.db && window.db.projects) {
+        const idx = window.db.projects.findIndex(x => x.id === id);
+        if (idx !== -1) window.db.projects[idx] = detail;
+        else window.db.projects.push(detail);
+        const active = currentProjectId || window.currentProjectId;
+        if (active === id) renderTab();
+      }
+    } catch(e) { console.warn('openProjectDetail load error:', e); }
+  }
+};
+window.backToProjects = function(){ currentProjectId=null; window.currentProjectId=null; renderTab(); };
 
 function renderProjectDetail(el){
-  const p = db.projects.find(x=>x.id===currentProjectId);
-  if(!p){ currentProjectId=null; renderProjectsList(el); return; }
+  const activeId = currentProjectId || window.currentProjectId;
+  const p = db.projects && db.projects.find(x=>x.id===activeId);
+  if(!p){
+    el.innerHTML = `<div class="topbar">
+      <div>
+        <button class="ghost small" onclick="backToProjects()">‹ Projelere Dön</button>
+        <h1 style="margin-top:8px;">Proje Yükleniyor...</h1>
+      </div>
+    </div>
+    <div class="panel"><p class="muted">Proje bilgileri yükleniyor, lütfen bekleyin...</p></div>`;
+    return;
+  }
   const editable = can('manageProjects');
   const canProgress = editable || can('updateProjectProgress');
   const stCls = p.status==='Tamamlandı'?'b-ok':(p.status==='İptal'?'b-muted':(p.status==='Devam Ediyor'?'b-accent':'b-warn'));
   const prCls = p.priority==='Yüksek'?'b-danger':(p.priority==='Orta'?'b-warn':'b-muted');
   const tabs = [['genel','Genel Bilgi'],['tasks','Görevler'],['progress','İlerleme Günlüğü']];
   if(editable){ tabs.push(['budget','Bütçe'],['quotes','Teklifler']); }
+  const activeTab = projectDetailTab || window.projectDetailTab || 'genel';
   el.innerHTML = `<div class="topbar">
       <div>
         <button class="ghost small" onclick="backToProjects()">‹ Projelere Dön</button>
@@ -2805,14 +3398,14 @@ function renderProjectDetail(el){
       </div>
       ${editable?`<div class="row"><button class="ghost small" onclick="openProjectForm('${p.id}')">✎ Düzenle</button><button class="ghost small" onclick="deleteProject('${p.id}')">Sil</button></div>`:''}
     </div>
-    <div class="tabs">${tabs.map(([k,label])=>`<button class="${projectDetailTab===k?'active':''}" onclick="projectDetailTab='${k}'; renderTab();">${label}</button>`).join('')}</div>
+    <div class="tabs">${tabs.map(([k,label])=>`<button class="${activeTab===k?'active':''}" onclick="projectDetailTab='${k}'; window.projectDetailTab='${k}'; renderTab();">${label}</button>`).join('')}</div>
     <div id="projectDetailBody"></div>`;
   const body = document.getElementById('projectDetailBody');
-  if(projectDetailTab==='genel') renderProjectGenel(body, p, editable);
-  else if(projectDetailTab==='tasks') renderProjectTasks(body, p, editable, canProgress);
-  else if(projectDetailTab==='progress') renderProjectProgress(body, p, canProgress, editable);
-  else if(projectDetailTab==='budget') renderProjectBudget(body, p);
-  else if(projectDetailTab==='quotes') renderProjectQuotes(body, p);
+  if(activeTab==='genel') renderProjectGenel(body, p, editable);
+  else if(activeTab==='tasks') renderProjectTasks(body, p, editable, canProgress);
+  else if(activeTab==='progress') renderProjectProgress(body, p, canProgress, editable);
+  else if(activeTab==='budget') renderProjectBudget(body, p);
+  else if(activeTab==='quotes') renderProjectQuotes(body, p);
 }
 
 function renderProjectGenel(body, p, editable){
@@ -3290,6 +3883,7 @@ function renderPrintSettings(body){
     `;
   } else {
     const isFault = designerFormTab === 'fault';
+    const target = t[designerFormTab] || {};
     contentHtml = `
       <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start;">
         <!-- Sol Sütun: Blok Düzenleyici & Ayarlar -->
@@ -3299,6 +3893,30 @@ function renderPrintSettings(body){
               <h3 style="margin:0;">${isFault ? '⚠️ Arıza Formu Blokları' : '🛠️ Bakım Formu Blokları'}</h3>
               <span class="badge ok" style="font-size:11px;">Admin Yetkisi</span>
             </div>
+
+            <!-- 3 Sütunlu Form Üst Bilgi Ayarları -->
+            <div style="background:#f8fafc; border:1px solid var(--line); border-radius:7px; padding:10px 12px; margin-bottom:14px;">
+              <div style="font-weight:700; font-size:12px; margin-bottom:8px; color:var(--ink);">📋 3 Sütunlu Form Üst Bilgileri</div>
+              <div class="field" style="margin-bottom:8px;">
+                <label class="f-label" style="font-size:11px;" for="s-formtitle">Form Başlığı (Orta Sütun)</label>
+                <input id="s-formtitle" type="text" style="font-size:12px; padding:4px 8px;" value="${esc(target.formTitle || (isFault ? 'ARIZA BİLDİRİM VE MÜDAHALE FORMU' : 'PERİYODİK BAKIM FORMU'))}" oninput="updateHeaderMeta('${designerFormTab}')">
+              </div>
+              <div class="grid3" style="gap:8px;">
+                <div class="field">
+                  <label class="f-label" style="font-size:11px;" for="s-formno">Form No</label>
+                  <input id="s-formno" type="text" style="font-size:12px; padding:4px 8px;" value="${esc(target.formNo || '')}" placeholder="Örn: FR-01" oninput="updateHeaderMeta('${designerFormTab}')">
+                </div>
+                <div class="field">
+                  <label class="f-label" style="font-size:11px;" for="s-revno">Rev. No</label>
+                  <input id="s-revno" type="text" style="font-size:12px; padding:4px 8px;" value="${esc(target.revisionNo || '')}" placeholder="Örn: 00" oninput="updateHeaderMeta('${designerFormTab}')">
+                </div>
+                <div class="field">
+                  <label class="f-label" style="font-size:11px;" for="s-revdate">Rev. Tarihi</label>
+                  <input id="s-revdate" type="text" style="font-size:12px; padding:4px 8px;" value="${esc(target.revisionDate || '')}" placeholder="YYYY-AA-GG" oninput="updateHeaderMeta('${designerFormTab}')">
+                </div>
+              </div>
+            </div>
+
             <p class="muted tiny" style="margin-bottom:12px;">Blokları <b>▲</b> ve <b>▼</b> butonlarıyla yukarı-aşağı taşıyabilir, formda görünmesini istemediğiniz alanların işaretini kaldırabilirsiniz. Değişiklikler sağdaki A4 önizlemede anında görünür.</p>
             <div id="designerBlockList"></div>
             <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
@@ -3571,6 +4189,23 @@ window.removeLogo = async function(){
   renderLivePreview(designerFormTab);
 };
 
+window.updateHeaderMeta = function(kind){
+  if(!can('manageTemplates')) return;
+  const t = migratePrintTemplate(db.printTemplate);
+  const target = t[kind];
+  if(!target) return;
+  const titleEl = document.getElementById('s-formtitle');
+  if(titleEl) target.formTitle = titleEl.value.trim();
+  const noEl = document.getElementById('s-formno');
+  if(noEl) target.formNo = noEl.value.trim();
+  const revNoEl = document.getElementById('s-revno');
+  if(revNoEl) target.revisionNo = revNoEl.value.trim();
+  const revDateEl = document.getElementById('s-revdate');
+  if(revDateEl) target.revisionDate = revDateEl.value.trim();
+  db.printTemplate = t;
+  renderLivePreview(kind);
+};
+
 window.saveSettings = async function(){
   if(!can('manageTemplates')){
     alert('Bu işlem için Yönetici yetkisine sahip olmalısınız.');
@@ -3585,6 +4220,17 @@ window.saveSettings = async function(){
   if(pageEl) t.pageSize = pageEl.value;
   const orientEl = document.getElementById('s-orient');
   if(orientEl) t.orientation = orientEl.value;
+
+  if(designerFormTab && t[designerFormTab]){
+    const titleEl = document.getElementById('s-formtitle');
+    if(titleEl) t[designerFormTab].formTitle = titleEl.value.trim();
+    const noEl = document.getElementById('s-formno');
+    if(noEl) t[designerFormTab].formNo = noEl.value.trim();
+    const revNoEl = document.getElementById('s-revno');
+    if(revNoEl) t[designerFormTab].revisionNo = revNoEl.value.trim();
+    const revDateEl = document.getElementById('s-revdate');
+    if(revDateEl) t[designerFormTab].revisionDate = revDateEl.value.trim();
+  }
 
   db.printTemplate = t;
   await saveDB();
@@ -3622,6 +4268,15 @@ function renderImportSettings(body){
       <input type="file" accept=".csv" onchange="importMaterialsFile(this)">
     </div>
     <div id="materialImportResult"></div>
+  </div>
+  <div class="panel">
+    <h2>Arıza Kayıtları (Açık &amp; Geçmiş Kayıtlar)</h2>
+    <p class="muted tiny">Şablonu indirip doldurun, sonra yükleyin. Geçmiş ve açık arıza kayıtlarınızı toplu olarak sisteme aktarabilirsiniz. "Varlık Kodu veya Adı" sistemdeki mevcut bir varlığa ait olmalıdır. Durum 'Çözüldü' ise çözüm tarihi ve çözüm notu otomatik kaydedilir.</p>
+    <div class="row">
+      <button class="ghost small" onclick="downloadFaultTemplate()">⬇ Şablonu İndir</button>
+      <input type="file" accept=".csv" onchange="importFaultsFile(this)">
+    </div>
+    <div id="faultImportResult"></div>
   </div>`;
 }
 window.downloadAssetTemplate = function(){
@@ -3699,6 +4354,89 @@ window.importMaterialsFile = function(inputEl){
     const el = document.getElementById('materialImportResult');
     if(el) el.innerHTML = `<div class="panel" style="margin-top:10px; background:#fafbfa;">
       <div style="font-weight:700; margin-bottom:6px;">${added} yeni malzeme eklendi, ${updated} malzeme güncellendi.</div>
+      ${errors.length?`<div class="muted tiny">${errors.map(e=>esc(e)).join('<br>')}</div>`:''}
+    </div>`;
+  };
+  reader.readAsText(file, 'UTF-8');
+};
+window.downloadFaultTemplate = function(){
+  const headers=['Varlık Kodu veya Adı','Arıza Başlığı','Açıklama','Öncelik','Durum','Bildirim Tarihi (YYYY-AA-GG)','Çözüm Tarihi (YYYY-AA-GG)','Çözüm Notu','Dış Servis Maliyeti'];
+  const example=['VG-001','Rulman Aşırı Isınma','Motor rulmanında yüksek sıcaklık ve ses tespit edildi.','Yüksek','Çözüldü','2025-02-10','2025-02-11','Rulman değiştirildi ve yağlama yapıldı.','1500'];
+  exportCSV('ariza-sablonu.csv', headers, [example]);
+};
+window.importFaultsFile = function(inputEl){
+  const file = inputEl.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = async function(){
+    const rows = parseCSV(String(reader.result));
+    if(rows.length<2){ alert('Dosyada veri satırı bulunamadı.'); inputEl.value=''; return; }
+    const dataRows = rows.slice(1);
+    let added=0; const errors=[];
+    const items = [];
+    dataRows.forEach((r,idx)=>{
+      const cols = r.map(c=>(c||'').trim());
+      const [assetRef, title, description, priority, status, repDate, resDate, resNotes, cost] = cols;
+      if(!title){ errors.push(`Satır ${idx+2}: Arıza başlığı boş, atlandı.`); return; }
+      let a = null;
+      if(assetRef){
+        a = db.assets.find(x=>(x.assetCode||'').toLowerCase()===assetRef.toLowerCase() || (x.name||'').toLowerCase()===assetRef.toLowerCase());
+      }
+      const assetId = a ? a.id : null;
+      const priorityVal = ['Düşük','Orta','Yüksek','Kritik'].includes(priority) ? priority : 'Orta';
+      const statusVal = ['Açık','İnceleniyor','Çözüldü','İptal'].includes(status) ? status : (resDate ? 'Çözüldü' : 'Açık');
+      const repDateVal = /^\d{4}-\d{2}-\d{2}$/.test(repDate||'') ? repDate : todayStr();
+      const resDateVal = /^\d{4}-\d{2}-\d{2}$/.test(resDate||'') ? resDate : (statusVal==='Çözüldü'?todayStr():null);
+      const costVal = parseFloat(cost)||0;
+
+      items.push({
+        title,
+        description: description || '',
+        assetId,
+        priority: priorityVal,
+        status: statusVal,
+        reportedDate: repDateVal,
+        resolvedDate: resDateVal,
+        resolutionNotes: resNotes || '',
+        cost: costVal
+      });
+    });
+
+    if(window.CMMS_API && window.CMMS_API.bulkCreateFaults){
+      try{
+        const res = await window.CMMS_API.bulkCreateFaults(items);
+        added = res.created || 0;
+        if(window.reloadFaults) await window.reloadFaults();
+      }catch(err){
+        errors.push('Sunucuya aktarırken hata: ' + (err.message||err));
+      }
+    } else {
+      items.forEach(it=>{
+        db.faults.push({
+          id: uid('f'),
+          trackingNo: nextNo('fault'),
+          title: it.title,
+          description: it.description,
+          assetId: it.assetId,
+          priority: it.priority,
+          status: it.status,
+          reportedDate: it.reportedDate,
+          resolvedDate: it.resolvedDate,
+          resolutionNotes: it.resolutionNotes,
+          cost: it.cost,
+          materials: [],
+          actions: []
+        });
+        added++;
+      });
+      await saveDB();
+    }
+
+    inputEl.value='';
+    renderTab();
+    const el = document.getElementById('faultImportResult');
+    if(el) el.innerHTML = `<div class="panel" style="margin-top:10px; background:#fafbfa;">
+      <div style="font-weight:700; margin-bottom:6px;">${added} arıza kaydı başarıyla aktarıldı.</div>
       ${errors.length?`<div class="muted tiny">${errors.map(e=>esc(e)).join('<br>')}</div>`:''}
     </div>`;
   };

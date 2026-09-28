@@ -55,7 +55,7 @@ router.get('/', async (req, res) => {
         s.name AS supplier_name
       FROM materials m
       LEFT JOIN suppliers s ON s.id = m.default_supplier_id
-      WHERE m.qty <= m.min_qty
+      WHERE m.qty < m.min_qty
         AND NOT EXISTS (
           SELECT 1 FROM needs_list nl 
           WHERE nl.material_id = m.id AND nl.status != 'Alındı'

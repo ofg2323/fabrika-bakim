@@ -168,6 +168,7 @@ app.use('/api/faults', require('./modules/faults/faults.routes'));
 
 app.use('/api/inspections', require('./modules/inspections/inspections.routes'));
 app.use('/api/ext-maintenance', require('./modules/ext-maintenance/ext-maintenance.routes'));
+app.use('/api/calibrations', require('./modules/calibrations/calibrations.routes'));
 
 app.use('/api/projects', require('./modules/projects/projects.routes'));
 app.use('/api/settings', require('./modules/settings/settings.routes'));

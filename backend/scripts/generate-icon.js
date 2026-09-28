@@ -75,14 +75,17 @@ function crc32(buf) {
 const rootDir = path.resolve(__dirname, '../../');
 const icoPath = path.join(rootDir, 'Fabrika Bakım Yönetimi.ico');
 
-if (fs.existsSync(icoPath)) {
-  console.log('ℹ️ Gerçek Fabrika Bakım Yönetimi.ico mevcut, üzerine yazılmadı.');
-} else {
-  // Fabrika Bakım Kurumsal Yeşil (#166534 -> R:22, G:101, B:52)
-  const png192 = createPng(192, 192, 22, 101, 52);
-  const png512 = createPng(512, 512, 22, 101, 52);
-  fs.writeFileSync(path.join(rootDir, 'icon-192.png'), png192);
-  fs.writeFileSync(path.join(rootDir, 'icon-512.png'), png512);
+// Fabrika Bakım Kurumsal Yeşil (#166534 -> R:22, G:101, B:52)
+const png192 = createPng(192, 192, 22, 101, 52);
+const png512 = createPng(512, 512, 22, 101, 52);
+
+fs.writeFileSync(path.join(rootDir, 'icon-192.png'), png192);
+fs.writeFileSync(path.join(rootDir, 'icon-512.png'), png512);
+if (!fs.existsSync(path.join(rootDir, 'favicon.ico'))) {
   fs.writeFileSync(path.join(rootDir, 'favicon.ico'), png192);
-  console.log('✅ icon-192.png, icon-512.png ve favicon.ico oluşturuldu.');
 }
+
+if (!fs.existsSync(icoPath)) {
+  fs.writeFileSync(icoPath, png192);
+}
+console.log('✅ icon-192.png, icon-512.png ve favicon.ico doğrulandı/oluşturuldu.');

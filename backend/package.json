@@ -9,7 +9,7 @@
     "dev": "node --watch src/server.js",
     "db:init": "node src/db/init.js",
     "tunnel": "tools\\cloudflared.exe tunnel --protocol http2 --url http://localhost:3001",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test --test-concurrency=1 tests/*.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
