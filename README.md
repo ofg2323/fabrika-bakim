@@ -25,11 +25,13 @@ Uygulama; modern bir **PWA (Progressive Web App)** arayüzü, **Node.js / Expres
 ## 🌟 Genel Bakış ve Temel Özellikler
 
 - **Uçtan Uca Bakım Yönetimi**: Planlı/periyodik koruyucu bakımlar, kestirimci kontroller ve beklenmeyen arıza kayıtlarının anlık yönetimi.
-- **Otomatik Sayaç & Takip Numaraları**: Tüm iş emirleri yarış durumuna (race condition) karşı korumalı PostgreSQL atomik sayaçları ile kurumsal kodlarla etiketlenir (`A00001` Arıza, `B00001` Bakım, `C00001` Muayene, `D00001` Dış Bakım, `P00001` Proje).
-- **Yedek Parça ve Stok Entegrasyonu**: Bakım ve arıza müdahalelerinde harcanan parçaların otomatik stoktan düşülmesi ve maliyetlerin iş emrine yansıtılması.
+- **Otomatik Sayaç & Takip Numaraları**: Tüm iş emirleri yarış durumuna (race condition) karşı korumalı PostgreSQL atomik sayaçları ile kurumsal kodlarla etiketlenir (`A00001` Arıza, `B00001` Bakım, `C00001` Muayene, `D00001` Dış Bakım, `K00001` Kalibrasyon, `P00001` Proje).
+- **Yedek Parça ve Stok Entegrasyonu**: Bakım ve arıza müdahalelerinde harcanan parçaların otomatik stoktan düşülmesi ve maliyetlerin iş emrine yansıtılması; arıza ve bakım düzenleme pencerelerinde 600+ envanter kalemini anında listeleyen Türkçe karakter uyumlu arama.
+- **Katı Yönetici Silme Yetkisi (Strict RBAC Deletion)**: Yanlışlıkla veya yetkisiz veri silinmelerini önlemek adına girilen tüm kayıtların (Varlık, Bakım, Arıza, Muayene, Dış Bakım, Kalibrasyon, Malzeme, Satın Alma, Proje vb.) silinmesi yalnızca `Yönetici` rolüne tahsis edilmiştir.
 - **Otomatik Kritik Stok Tespiti**: Minimum seviyenin altına düşen malzemelerin otomatik olarak ihtiyaç listesine düşmesi.
 - **Satın Alma — Stok — İhtiyaç Zinciri (Atomik Transaction)**: Satın alma onaylandığında stok bakiyesinin artırılması, stok hareket günlüğünün oluşturulması ve açık talebin kapatılmasının tek bir veritabanı işlemi (`BEGIN ... COMMIT`) ile garanti altına alınması.
 - **Yasal Muayene ve Taşeron Servis Takibi**: Basınçlı kaplar, kaldırma araçları vb. için periyodik kontrol döngüleri, akredite firma ve sertifika/rapor arşivleme.
+- **Ölçüm Cihazı ve Kalibrasyon Yönetimi**: ISO ve metrolojik standartlara uygun cihaz kalibrasyon takibi, akredite kalibrasyon kuruluşu, geçerlilik süresi ve sertifika arşivi.
 - **Proje ve CAPEX Yönetimi**: Fabrika revizyon ve yatırım projeleri için alt görevler, tedarikçi teklifleri, bütçe revizyon geçmişi ve gerçekleşen harcama takibi.
 - **Kurumsal İş Emri Yazdırma (Baskı Şablonu)**: Özelleştirilebilir fabrika logosu, firma başlığı ve form kuralları ile A4 formatında temiz iş emri ve bakım raporu dökümleri.
 - **Progressive Web App (PWA)**: Kurulum gerektirmeden masaüstü ve mobil cihazlara doğrudan yüklenebilir (Service Worker ve Web App Manifest destekli).
@@ -38,24 +40,25 @@ Uygulama; modern bir **PWA (Progressive Web App)** arayüzü, **Node.js / Expres
 
 ## 🧩 Fonksiyonel Modüller
 
-| Modül | Uç Nokta | Yetki Rolleri | Açıklama |
+| Modül | Uç Nokta | Yetki Rolleri (Yazma / Silme) | Açıklama |
 | :--- | :--- | :--- | :--- |
 | **Kimlik Doğrulama** | `/api/auth` | Herkese Açık | JWT tabanlı oturum açma, ilk yönetici kurulumu (`/first-admin`), kullanıcı giriş listesi. |
-| **Kullanıcı Yönetimi** | `/api/users` | Yönetici / Kullanıcı | `Yönetici`, `Teknisyen`, `Depo Sorumlusu` rolleri, şifre ve profil yönetimi. |
-| **Varlık Grupları** | `/api/asset-groups` | Yönetici / Teknisyen | Varlık kategorizasyonu, periyot günleri, dinamik kontrol listeleri (Checklist), muayene ve dış bakım ayarları. |
-| **Varlıklar (Ekipmanlar)** | `/api/assets` | Tüm Roller | Makine kartları, hiyerarşik üst/alt varlık ağacı, QR/kod takibi, ekler (resim/şema/PDF), yedek parça ilişkileri. |
-| **Malzeme & Envanter** | `/api/materials` | Depo / Yönetici | Malzeme kartları, birimler, birim maliyet, kritik stok seviyesi (`min_qty`), anlık stok düzeltme (`/adjust`). |
-| **Stok Hareketleri** | `/api/stock` | Depo / Yönetici | Giriş/Çıkış logları, işlem nedeni, kullanıcı izi, anlık KPI özeti (`/summary`). |
-| **İhtiyaç Listesi** | `/api/needs-list` | Tüm Roller | Malzeme talepleri, `?includeAuto=true` ile kritik stokları otomatik listeleme, talep onay durumları. |
-| **Satın Alma** | `/api/purchases` | Depo / Yönetici | Satın alma kayıtları, otomatik stok girişi ve ihtiyaç karşılama (Atomik Transaction). |
-| **Periyodik Bakımlar** | `/api/maintenance` | Teknisyen / Yönetici | İş emirleri (`B00001`), checklist yanıtları, parça sarfiyatı ve stok düşümü, işçilik ve ek maliyet hesabı. |
-| **Arıza Takip** | `/api/faults` | Tüm Roller | Hızlı arıza bildirme (`A00001`), teknisyen atama, otomatik varlık durum güncellemesi ('Arızalı' ↔ 'Aktif'), görsel/belge yükleme. |
-| **Yasal Muayeneler** | `/api/inspections` | Yönetici / Teknisyen | Grup bazlı periyodik muayeneler (`C00001`), çoklu varlık bağlama, rapor/sertifika yükleme, muayene takvimi güncelleme. |
-| **Dış Bakım (Taşeron)** | `/api/ext-maintenance` | Yönetici / Teknisyen | Yetkili servis ve dış bakım kayıtları (`D00001`), servis sertifikaları, maliyet ve garanti takibi. |
-| **Tedarikçiler** | `/api/suppliers` | Depo / Yönetici | Firma rehberi, yetkili kişi, iletişim bilgileri, ödeme vadeleri. |
-| **Projeler** | `/api/projects` | Yönetici | Yatırım/revizyon projeleri (`P00001`), alt görevler, tedarikçi teklifleri, bütçe revizyonları, ilerleme günlükleri. |
-| **Baskı & Sistem Ayarları** | `/api/settings` | Yönetici | Fabrika adı, kurumsal logo yükleme, A4 form baskı görünüm ayarları. |
-| **Denetim İzi (Audit Logs)** | `/api/audit-logs` | Yönetici | Sistem genelindeki kritik veri değişiklikleri (kim, ne zaman, hangi IP, işlem, eski/yeni veri). |
+| **Kullanıcı Yönetimi** | `/api/users` | Yönetici / Yönetici (Silme) | `Yönetici`, `Teknisyen`, `Depo Sorumlusu` rolleri, şifre ve profil yönetimi. |
+| **Varlık Grupları** | `/api/asset-groups` | Yönetici / Yönetici (Silme) | Varlık kategorizasyonu, periyot günleri, dinamik kontrol listeleri (Checklist), muayene, dış bakım ve kalibrasyon ayarları. |
+| **Varlıklar (Ekipmanlar)** | `/api/assets` | Tüm Roller / Yönetici (Silme) | Makine kartları, hiyerarşik üst/alt varlık ağacı, QR/kod takibi, ekler (resim/şema/PDF), yedek parça ilişkileri. |
+| **Malzeme & Envanter** | `/api/materials` | Depo, Yönetici / Yönetici (Silme) | Malzeme kartları, birimler, birim maliyet, kritik stok seviyesi (`min_qty`), anlık stok düzeltme (`/adjust`), Türkçe diyakritik uyumlu arama. |
+| **Stok Hareketleri** | `/api/stock` | Depo, Yönetici / Depo, Yönetici (Silme) | Giriş/Çıkış logları, işlem nedeni, kullanıcı izi, anlık KPI özeti (`/summary`), hareket silindiğinde stoku otomatik geri alma. |
+| **İhtiyaç Listesi** | `/api/needs-list` | Tüm Roller / Depo, Yönetici (Silme) | Malzeme talepleri, `?includeAuto=true` ile kritik stokları otomatik listeleme, talep onay durumları. |
+| **Satın Alma** | `/api/purchases` | Depo, Yönetici / Yönetici (Silme) | Satın alma kayıtları, otomatik stok girişi ve ihtiyaç karşılama (Atomik Transaction), silindiğinde stoku geri alma koruması. |
+| **Periyodik Bakımlar** | `/api/maintenance` | Teknisyen, Yönetici / Yönetici (Silme) | İş emirleri (`B00001`), checklist yanıtları, parça sarfiyatı ve stok düşümü, işçilik ve ek maliyet hesabı, silindiğinde stoka iade. |
+| **Arıza Takip** | `/api/faults` | Tüm Roller / Yönetici (Silme) | Hızlı arıza bildirme (`A00001`), teknisyen atama, otomatik varlık durum güncellemesi ('Arızalı' ↔ 'Aktif'), görsel/belge yükleme, toplu arıza içe aktarımı (`/bulk`). |
+| **Yasal Muayeneler** | `/api/inspections` | Yönetici, Teknisyen / Yönetici (Silme) | Grup bazlı periyodik muayeneler (`C00001`), çoklu varlık bağlama, rapor/sertifika yükleme, muayene takvimi güncelleme. |
+| **Dış Bakım (Taşeron)** | `/api/ext-maintenance` | Yönetici, Teknisyen / Yönetici (Silme) | Yetkili servis ve dış bakım kayıtları (`D00001`), servis sertifikaları, maliyet ve garanti takibi. |
+| **Kalibrasyon Yönetimi** | `/api/calibrations` | Yönetici, Teknisyen / Yönetici (Silme) | Ölçüm aletleri ve cihazların periyodik kalibrasyonları (`K00001`), akredite laboratuvar takibi, geçerlilik takvimi ve sertifika/rapor yükleme. |
+| **Tedarikçiler** | `/api/suppliers` | Depo, Yönetici / Yönetici (Silme) | Firma rehberi, yetkili kişi, iletişim bilgileri, ödeme vadeleri. |
+| **Projeler** | `/api/projects` | Yönetici, Teknisyen / Yönetici (Silme) | Yatırım/revizyon projeleri (`P00001`), alt görevler, tedarikçi teklifleri, bütçe revizyonları, ilerleme günlükleri. |
+| **Baskı & Sistem Ayarları** | `/api/settings` | Yönetici / Yönetici | Fabrika adı, kurumsal logo yükleme, A4 form baskı görünüm ayarları. |
+| **Denetim İzi (Audit Logs)** | `/api/audit-logs` | Yönetici (Sadece Okuma) | Sistem genelindeki kritik veri değişiklikleri (kim, ne zaman, hangi IP, işlem, eski/yeni veri). |
 
 ---
 
@@ -144,7 +147,9 @@ fabrika-bakim-backend/
     │   └── modules/           # Modüler iş mantığı rotaları
     │       ├── asset-groups/  # Varlık grupları ve checklist şablonları
     │       ├── assets/        # Varlık CRUD, ekler ve yedek parça ilişkileri
+    │       ├── audit-logs/    # Merkezi denetim izi ve log sorguları
     │       ├── auth/          # Giriş, ilk yönetici kaydı ve genel kullanıcı listesi
+    │       ├── calibrations/  # Ölçüm cihazı kalibrasyon kayıtları ve sertifikaları
     │       ├── ext-maintenance/# Taşeron dış bakım kayıtları ve sertifikaları
     │       ├── faults/        # Arıza yönetimi, parça kullanımı ve durum güncellemesi
     │       ├── inspections/   # Yasal muayene kayıtları ve sertifikaları
@@ -170,7 +175,10 @@ fabrika-bakim-backend/
     │   ├── 04_maintenance_faults.test.js
     │   ├── 05_inspections_extmaint.test.js
     │   ├── 06_projects_settings.test.js
-    │   └── 07_security_static.test.js
+    │   ├── 07_security_static.test.js
+    │   ├── 08_p1_features.test.js
+    │   ├── 09_calibration_stock_del_fault_bulk.test.js
+    │   └── 10_admin_delete_permissions.test.js
     │
     └── uploads/               # Yüklenen görseller, sertifikalar, logolar ve PDF belgeleri
 ```
@@ -189,6 +197,8 @@ erDiagram
     USERS ||--o{ STOCK_MOVEMENTS : "işlem yapan"
     USERS ||--o{ PURCHASES : "satın alan"
     USERS ||--o{ PROJECTS : "proje sorumlusu"
+    USERS ||--o{ CALIBRATION_RECORDS : "kalibrasyon yapan"
+    USERS ||--o{ AUDIT_LOGS : "işlem sahibi"
 
     ASSET_GROUPS ||--o{ ASSETS : "içerir"
     ASSET_GROUPS ||--o{ INSPECTION_RECORDS : "muayene edilir"
@@ -198,10 +208,12 @@ erDiagram
     ASSETS ||--o{ FAULTS : "arıza geçmişi"
     ASSETS ||--o{ ASSET_ATTACHMENTS : "ekler"
     ASSETS }|--|{ MATERIALS : "yedek parçalar"
+    ASSETS ||--o{ CALIBRATION_RECORD_ASSETS : "kalibre edilen cihazlar"
 
     SUPPLIERS ||--o{ MATERIALS : "varsayılan tedarikçi"
     SUPPLIERS ||--o{ PURCHASES : "tedarikçi"
     SUPPLIERS ||--o{ PROJECT_QUOTES : "teklif veren"
+    SUPPLIERS ||--o{ CALIBRATION_RECORDS : "akredite laboratuvar / servis"
 
     MATERIALS ||--o{ STOCK_MOVEMENTS : "hareketler"
     MATERIALS ||--o{ PURCHASES : "satın alımlar"
@@ -212,6 +224,9 @@ erDiagram
     PROJECTS ||--o{ PROJECT_QUOTES : "teklifler"
     PROJECTS ||--o{ PROJECT_BUDGET_HISTORY : "bütçe geçmişi"
     PROJECTS ||--o{ PURCHASES : "proje harcamaları"
+
+    CALIBRATION_RECORDS ||--o{ CALIBRATION_RECORD_ASSETS : "kapsanan varlıklar"
+    CALIBRATION_RECORDS ||--o{ CALIBRATION_CERTIFICATES : "sertifikalar"
 ```
 
 ### Özel Veritabanı Nitelikleri
@@ -222,7 +237,7 @@ erDiagram
      UPDATE counters SET value = value + 1 WHERE kind = kind_input RETURNING value;
    $$ LANGUAGE sql;
    ```
-   Bu mekanizma sayesinde bakım (`B00001`), arıza (`A00001`), muayene (`C00001`), dış bakım (`D00001`) ve proje (`P00001`) kodları eşzamanlı isteklerde dahi mükerrerlik olmadan ardışık üretilir.
+   Bu mekanizma sayesinde bakım (`B00001`), arıza (`A00001`), muayene (`C00001`), dış bakım (`D00001`), kalibrasyon (`K00001`) ve proje (`P00001`) kodları eşzamanlı isteklerde dahi mükerrerlik olmadan ardışık üretilir.
 
 2. **Atomik Satın Alma ve Stok Entegrasyonu**:
    Bir satın alma kaydedildiğinde (`POST /api/purchases`), `purchases` tablosuna kayıt atılır, `stock_movements` tablosuna `Giriş` kaydı eklenir, `materials.qty` güncellenir ve eğer bir ihtiyaç talebine bağlıysa `needs_list.status` değeri `Alındı` olarak işaretlenir. Herhangi bir adımda hata olursa tüm işlem geri alınır (`ROLLBACK`).
@@ -337,74 +352,95 @@ Tüm korumalı uç noktalarda HTTP başlığı olarak `Authorization: Bearer <TO
 - `GET /api/asset-groups`: Grupları ve bakım periyotlarını listeler.
 - `POST /api/asset-groups`: Yeni grup ve checklist şablonu tanımlar.
 - `PUT /api/asset-groups/:id`: Grubu ve checklist sorularını günceller.
-- `DELETE /api/asset-groups/:id`: Grubu siler.
+- `DELETE /api/asset-groups/:id` *(Yönetici)*: Grubu siler.
 
 ### 4. Varlıklar / Makineler (`/api/assets`)
 - `GET /api/assets`: Varlıkları listeler (filtreler: `groupId`, `status`, `search`).
 - `GET /api/assets/:id`: Varlık detayını, bağlı yedek parçalarını ve eklerini döner.
 - `POST /api/assets`: Yeni varlık kartı oluşturur.
 - `PUT /api/assets/:id`: Varlık kartını günceller.
-- `DELETE /api/assets/:id`: Varlığı siler.
+- `DELETE /api/assets/:id` *(Yönetici)*: Varlığı siler.
 - `POST /api/assets/:id/attachments`: Varlığa resim veya teknik PDF ekler (Multipart).
-- `DELETE /api/assets/:id/attachments/:attId`: Ekli dosyayı ve veritabanı kaydını siler.
+- `DELETE /api/assets/:id/attachments/:attId` *(Yönetici)*: Ekli dosyayı ve veritabanı kaydını siler.
 - `PUT /api/assets/:id/spare-parts`: Varlığa yedek parça listesi atar.
 - `GET /api/assets/:id/history`: Varlığın geçmiş bakım, arıza, muayene kayıtlarını ve toplam maliyetini döner.
 
-### 5. Malzemeler ve Stok (`/api/materials` & `/api/stock`)
-- `GET /api/materials`: Stok kartlarını listeler (`?lowStock=true` ile kritik stok filtresi).
+### 5. Tedarikçiler (`/api/suppliers`)
+- `GET /api/suppliers`: Tedarikçileri listeler (`q` ile firma, yetkili ve telefon araması).
+- `POST /api/suppliers`: Yeni tedarikçi kaydeder.
+- `PUT /api/suppliers/:id`: Tedarikçi bilgilerini günceller.
+- `DELETE /api/suppliers/:id` *(Yönetici)*: Tedarikçi kaydını siler.
+
+### 6. Malzemeler ve Stok (`/api/materials` & `/api/stock`)
+- `GET /api/materials`: Stok kartlarını listeler (`?lowStock=true` ile kritik stok filtresi, `q` arama).
 - `POST /api/materials`: Yeni malzeme kartı tanımlar.
 - `PUT /api/materials/:id`: Malzeme bilgilerini günceller.
+- `DELETE /api/materials/:id` *(Yönetici)*: Malzeme kartını siler.
 - `POST /api/materials/:id/adjust`: Hızlı stok düzeltmesi yapar ve hareket günlüğü oluşturur.
 - `GET /api/stock/summary`: Toplam malzeme sayısı, kritik stok adedi ve toplam envanter maliyetini döner.
 - `GET /api/stock/movements`: Stok giriş/çıkış hareketlerini sayfalı ve filtreli (`materialId`, `type`, `q`, `startDate`, `endDate`) listeler.
 - `POST /api/stock/movements`: Atomik stok hareketi kaydeder (Stok yetersizliğinde negatif bakiye engellenir ve `409 Conflict` döner).
+- `DELETE /api/stock/movements/:id` *(Yönetici)*: Stok hareketini siler ve malzeme miktarını ters işlemle otomatik düzeltir.
 
-### 6. İhtiyaç Listesi (`/api/needs-list`)
+### 7. İhtiyaç Listesi (`/api/needs-list`)
 - `GET /api/needs-list`: Talepleri listeler (`?includeAuto=true` kritik stokları da sanal talep olarak döner).
 - `POST /api/needs-list`: Manuel malzeme talebi oluşturur.
 - `PUT /api/needs-list/:id`: Talep durumunu (`Beklemede`, `Sipariş Verildi`, `Alındı`) günceller.
-- `DELETE /api/needs-list/:id`: Talep kaydını siler.
+- `DELETE /api/needs-list/:id` *(Yönetici)*: Talep kaydını siler.
 
-### 7. Satın Alma (`/api/purchases`)
+### 8. Satın Alma (`/api/purchases`)
 - `GET /api/purchases`: Satın alma geçmişini listeler.
 - `POST /api/purchases`: Yeni alım kaydeder; **stoku otomatik artırır** ve talebi karşılar.
 - `DELETE /api/purchases/:id` *(Yönetici)*: Alımı siler ve stoku eski haline düşer.
 
-### 8. Bakım Kayıtları (`/api/maintenance`)
+### 9. Bakım Kayıtları (`/api/maintenance`)
 - `GET /api/maintenance`: Bakımları listeler (`assetId`, `groupId`, `type`, `startDate`, `endDate`, `q`).
 - `GET /api/maintenance/:id`: Bakım detayını, kontrol listesi sonuçlarını ve kullanılan parçaları döner.
 - `POST /api/maintenance`: Yeni bakım kaydeder (`Bxxxxx`), kullanılan parçaları **stoktan düşer** ve makinenin son bakım tarihini günceller.
 - `PUT /api/maintenance/:id`: Bakım kaydını günceller.
-- `DELETE /api/maintenance/:id`: Bakım kaydını siler.
+- `DELETE /api/maintenance/:id` *(Yönetici)*: Bakım kaydını siler.
 
-### 9. Arıza Kayıtları (`/api/faults`)
+### 10. Arıza Kayıtları (`/api/faults`)
 - `GET /api/faults`: Arıza kayıtlarını listeler (`status`, `priority`, `assetId`, `q`).
 - `GET /api/faults/:id`: Arıza detayını, kullanılan parçaları ve fotoğrafları döner.
 - `POST /api/faults`: Arıza kaydı açar (`Axxxxx`), makineyi **'Arızalı'** yapar.
 - `PUT /api/faults/:id`: Arıza durumunu günceller; tamamlandığında makineyi **'Aktif'** yapar ve parçaları stoktan düşer.
 - `POST /api/faults/:id/attachments`: Arıza fotoğrafı/raporu yükler.
-- `DELETE /api/faults/:id`: Arıza kaydını siler.
+- `DELETE /api/faults/:id` *(Yönetici)*: Arıza kaydını siler.
 
-### 10. Muayene ve Dış Bakım (`/api/inspections` & `/api/ext-maintenance`)
+### 11. Muayene ve Dış Bakım (`/api/inspections` & `/api/ext-maintenance`)
 - `GET /api/inspections` / `GET /api/ext-maintenance`: Kayıtları listeler.
 - `POST /api/inspections` / `POST /api/ext-maintenance`: Yeni kayıt açar (`Cxxxxx` / `Dxxxxx`), gruptaki tüm varlıkların yasal/servis tarihlerini günceller.
+- `PUT /api/inspections/:id` / `PUT /api/ext-maintenance/:id`: Kaydı günceller.
+- `DELETE /api/inspections/:id` *(Yönetici)* / `DELETE /api/ext-maintenance/:id` *(Yönetici)*: Kaydı siler.
 - `POST /api/inspections/:id/certificates`: Muayene raporu/sertifikası yükler.
 - `POST /api/ext-maintenance/:id/certificates`: Servis formu/fatura yükler.
 
-### 11. Projeler (`/api/projects`)
+### 12. Kalibrasyonlar (`/api/calibrations`)
+- `GET /api/calibrations`: Kalibrasyon geçmişini sayfalı listeler (`groupId`, `assetId`, `contractor`, `startDate`, `endDate`, `q`).
+- `GET /api/calibrations/:id`: Kalibrasyon detayını, kalibre edilen cihaz listesini ve sertifikaları döner.
+- `POST /api/calibrations`: Yeni kalibrasyon kaydı açar (`Kxxxxx`), seçilen varlıkların son kalibrasyon tarihlerini atomik olarak günceller.
+- `PUT /api/calibrations/:id`: Kalibrasyon kaydını ve bağlı varlıkları günceller.
+- `DELETE /api/calibrations/:id` *(Yönetici)*: Kalibrasyon kaydını ve diskteki sertifika dosyalarını siler.
+- `POST /api/calibrations/:id/certificates`: Kalibrasyon sertifikası, test raporu veya web linki ekler.
+- `DELETE /api/calibrations/:id/certificates/:certId` *(Yönetici)*: İlgili sertifikayı siler.
+
+### 13. Projeler (`/api/projects`)
 - `GET /api/projects`: Projeleri ve bütçe/harcama oranlarını listeler.
 - `POST /api/projects`: Yeni proje tanımlar (`Pxxxxx`).
+- `PUT /api/projects/:id`: Proje detaylarını ve durumunu günceller.
+- `DELETE /api/projects/:id` *(Yönetici)*: Proje kaydını siler.
 - `POST /api/projects/:id/tasks`: Projeye görev ekler.
 - `POST /api/projects/:id/quotes`: Projeye tedarikçi teklifi ve dosya ekler.
 - `POST /api/projects/:id/budget-history`: Bütçe revizyon kaydı ekler.
 - `POST /api/projects/:id/progress-logs`: İlerleme notu düşer.
 
-### 12. Sistem ve Baskı Ayarları (`/api/settings`)
+### 14. Sistem ve Baskı Ayarları (`/api/settings`)
 - `GET /api/settings`: Şirket adı, logo ve yazdırma kurallarını döner.
 - `PUT /api/settings`: Ayarları günceller.
 - `POST /api/settings/logo`: Kurumsal logo görseli yükler.
 
-### 13. Denetim İzi / Audit Logs (`/api/audit-logs`)
+### 15. Denetim İzi / Audit Logs (`/api/audit-logs`)
 - `GET /api/audit-logs` *(Yönetici)*: Sistem genelinde gerçekleşen tüm kritik işlemleri (kullanıcı oluşturma/silme, stok hareketleri, bakım & arıza açma/kapama vb.) zaman damgası, kullanıcı, IP adresi ve işlem detayıyla sayfalı olarak döner. Filtreler: `action`, `entity`, `userId`, `startDate`, `endDate`, `limit`, `offset`.
 
 > [!NOTE]
@@ -416,7 +452,9 @@ Tüm korumalı uç noktalarda HTTP başlığı olarak `Authorization: Bearer <TO
 
 - **Merkezi Denetim İzi (Audit Logging)**: Kullanıcı yönetimi, stok düzeltmeleri, bakım, arıza, varlık ve malzeme değişiklikleri veritabanı transaction güvenliği gözetilerek `audit_logs` tablosuna IP adresi ve işlem detayları ile kaydedilir.
 - **Rol Yetki Koruması (RBAC Enforcement)**: Yetkisiz rol atamaları (`SuperAdmin` vb. sahte roller) reddedilir. Yöneticinin kendi rolünü düşürerek yetkisiz kalması veya sistemdeki tek yöneticinin silinmesi engellenmiştir.
+- **Katı Yönetici Silme Yetkisi (Strict Deletion RBAC)**: Tüm modüllerdeki silme (`DELETE`) uç noktaları yalnızca `Yönetici` rolüne tahsis edilmiştir. Teknisyen, Depo Sorumlusu veya yetkisiz kullanıcıların silme girişimleri `403 Forbidden` ile reddedilir. Dış anahtar (`23503`) ilişkileri ve kaskat/set-null kuralları tam veri bütünlüğü sağlayacak şekilde yapılandırılmıştır.
 - **Stok Bakiye Koruması**: Mevcut stok miktarını aşan çıkış hareketleri `409 Conflict` hatası ile reddedilir; negatif stok bakiyeleri engellenir.
+- **Türkçe Karakter Uyumlu Genişletilmiş Malzeme Arama**: Malzeme ve sarfiyat seçimlerinde Türkçe karakter duyarlı (`İ/i`, `I/ı`, `Ş/ş`, `Ğ/ğ`, `Ü/ü`, `Ö/ö`, `Ç/ç`) normalizasyon (`trNormalize`) kullanılır; yapay sonuç sınırlamaları kaldırılarak 2500+ envanter kalemi arasında anlık arama desteklenir.
 - **Helmet Güvenlik Başlıkları**: X-Content-Type-Options, Strict-Transport-Security ve özel Content-Security-Policy (CSP) direktifleri uygulanmıştır.
 - **Hız Sınırlama (Rate Limiting)**:
   - Genel API için 15 dakikada en fazla 300 istek (üretim modu).
@@ -441,8 +479,10 @@ Backend, harici bir test kütüphanesine ihtiyaç duymadan Node.js yerleşik tes
 cd backend
 npm test
 ```
+> [!NOTE]
+> `npm test` komutu, testler öncesinde arka planda HTTP sunucusunu otomatik olarak denetler (`ensureServerRunning`), sunucu kapalıysa test sürecinde ayağa kaldırır ve test bitiminde temizler.
 
-### Test Kapsamı (8 Test Paketi):
+### Test Kapsamı (10 Test Dosyası / 14 Paket / 81 Test Senaryosu):
 1. `01_auth_users.test.js`: Giriş, JWT imzalama, yetkisiz erişim kontrolü, kullanıcı CRUD işlemleri.
 2. `02_assets_groups.test.js`: Varlık grupları, makine kartları, dosya ekleri, yedek parça ilişkileri.
 3. `03_materials_stock_purchases.test.js`: Stok kartları, kritik stok tespiti, atomik satın alma ve stok hareketi.
@@ -451,6 +491,8 @@ npm test
 6. `06_projects_settings.test.js`: Proje görevleri, teklif yükleme, bütçe revizyonu ve sistem ayarları.
 7. `07_security_static.test.js`: PWA manifest/sw doğrulaması, Helmet başlıkları ve zararlı dosya yükleme engelleme testi.
 8. `08_p1_features.test.js`: Merkezi denetim izi (audit logging), sayfalama sınırları ve HTTP başlıkları, rol whitelist/self-demotion koruması, stok yetersizliği 409 yönetimi.
+9. `09_calibration_stock_del_fault_bulk.test.js`: Kalibrasyon modülü uçtan uca akışı, `Kxxxxx` sayacı, sertifika yönetimi, stok hareketi silme ve bakiye geri alma, toplu arıza durum güncellemeleri.
+10. `10_admin_delete_permissions.test.js`: Tüm sistem modüllerinde (varlık, grup, malzeme, tedarikçi, bakım, arıza, muayene, dış bakım, kalibrasyon, proje vb.) yönetici silme yetkisi ve yetkisiz kullanıcıların silme girişimlerinin 403 ile engellenmesi.
 
 ---
 

@@ -252,19 +252,28 @@ router.post('/:id/adjust', requireRole('Yönetici', 'Depo Sorumlusu'), async (re
 
 // DELETE /api/materials/:id — Malzeme sil (Yalnızca Yönetici)
 router.delete('/:id', requireRole('Yönetici'), async (req, res) => {
-  const { rows } = await pool.query('DELETE FROM materials WHERE id=$1 RETURNING id, name', [req.params.id]);
-  if (!rows[0]) return res.status(404).json({ error: 'Malzeme bulunamadı.' });
+  try {
+    const { rows } = await pool.query('DELETE FROM materials WHERE id=$1 RETURNING id, name', [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Malzeme bulunamadı.' });
 
-  await logAudit(pool, {
-    userId: req.user.id,
-    action: 'MATERIAL_DELETE',
-    entity: 'materials',
-    entityId: req.params.id,
-    details: { name: rows[0].name },
-    ipAddress: getClientIp(req),
-  });
+    await logAudit(pool, {
+      userId: req.user.id,
+      action: 'MATERIAL_DELETE',
+      entity: 'materials',
+      entityId: req.params.id,
+      details: { name: rows[0].name },
+      ipAddress: getClientIp(req),
+    });
 
-  res.status(204).end();
+    res.status(204).end();
+  } catch (err) {
+    if (err.code === '23503') {
+      return res.status(400).json({
+        error: 'Bu malzeme bakım/arıza kayıtlarında, stok hareketlerinde veya satın almalarda kullanıldığı için silinemez.',
+      });
+    }
+    throw err;
+  }
 });
 
 module.exports = router;

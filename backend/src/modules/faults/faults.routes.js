@@ -305,11 +305,16 @@ router.put('/:id', async (req, res) => {
     priority,
     status,
     assignedTo,
+    assignedUserId,
     resolvedDate,
     notes,
+    techSolution,
     externalServiceCost,
     usedMaterials,
   } = req.body;
+
+  const finalAssigned = assignedTo !== undefined ? assignedTo : (assignedUserId !== undefined ? assignedUserId : undefined);
+  const finalNotes = notes !== undefined ? notes : (techSolution !== undefined ? techSolution : undefined);
 
   const client = await pool.connect();
   try {
@@ -403,9 +408,9 @@ router.put('/:id', async (req, res) => {
         description !== undefined ? description : null,
         priority || null,
         newStatus,
-        assignedTo || null,
+        finalAssigned !== undefined ? (finalAssigned || null) : oldFault.assigned_to,
         finalResolvedDate,
-        notes !== undefined ? notes : null,
+        finalNotes !== undefined ? finalNotes : oldFault.notes,
         externalServiceCost !== undefined ? parseFloat(externalServiceCost) || 0 : oldFault.external_service_cost,
         oldFault.id,
       ]

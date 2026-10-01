@@ -74,9 +74,18 @@ router.put('/:id', requireRole('Yönetici', 'Depo Sorumlusu'), async (req, res) 
 
 // DELETE /api/suppliers/:id — Tedarikçi sil (Yalnızca Yönetici)
 router.delete('/:id', requireRole('Yönetici'), async (req, res) => {
-  const { rows } = await pool.query('DELETE FROM suppliers WHERE id=$1 RETURNING id', [req.params.id]);
-  if (!rows[0]) return res.status(404).json({ error: 'Tedarikçi bulunamadı.' });
-  res.status(204).end();
+  try {
+    const { rows } = await pool.query('DELETE FROM suppliers WHERE id=$1 RETURNING id', [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Tedarikçi bulunamadı.' });
+    res.status(204).end();
+  } catch (err) {
+    if (err.code === '23503') {
+      return res.status(400).json({
+        error: 'Bu tedarikçiye bağlı satın alma veya malzeme kayıtları bulunduğu için silinemez.',
+      });
+    }
+    throw err;
+  }
 });
 
 module.exports = router;

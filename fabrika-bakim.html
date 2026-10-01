@@ -147,11 +147,13 @@ tbody tr:hover{background:#fafbfa;}
 .lowstock{color:var(--danger); font-weight:700;}
 .att-item{display:flex; gap:8px; align-items:center; border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin-bottom:6px;}
 .combo{position:relative;}
-.combo-list{position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid var(--line); border-radius:6px; max-height:190px; overflow-y:auto; z-index:80; display:none; box-shadow:0 6px 18px rgba(0,0,0,.12); margin-top:3px;}
-.combo-opt{padding:7px 10px; font-size:12.5px; cursor:pointer;}
+.combo-list{position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid var(--line); border-radius:8px; max-height:280px; overflow-y:auto; z-index:120; display:none; box-shadow:0 8px 24px rgba(0,0,0,.15); margin-top:3px;}
+.combo-opt{padding:8px 12px; font-size:12.5px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(0,0,0,.03);}
 .combo-opt:hover{background:var(--accent-soft);}
-.combo-sub{color:var(--ink-soft); font-size:11px; margin-left:6px;}
-.combo-empty{color:var(--ink-soft); cursor:default;}
+.combo-opt.combo-selected{background:rgba(37,99,235,.08); font-weight:600;}
+.combo-sub{color:var(--ink-soft); font-size:11px; margin-left:8px; white-space:nowrap;}
+.combo-header{padding:6px 12px; font-size:11px; font-weight:600; color:var(--ink-soft); background:var(--bg); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:2;}
+.combo-empty{color:var(--ink-soft); cursor:default; padding:10px 12px; font-size:12px; text-align:center;}
 .combo-empty:hover{background:none;}
 .filterbar{display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px;}
 .filterbar input[type=text]{min-width:220px; flex:1;}
@@ -259,37 +261,105 @@ let costStartDate='', costEndDate='', costFType='';
 var currentProjectId = null, projectDetailTab = 'genel', projectQuery='', projectFStatus='';
 let movQuery='', movFType='';
 let comboData = {}, comboOnChangeMap = {};
+
+function trNormalize(s){
+  return (s || '')
+    .toLocaleLowerCase('tr-TR')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ı/g, 'i')
+    .trim();
+}
+
 function comboHtml(id, placeholder){
   return `<div class="combo">
     <input type="text" class="combo-input" id="${id}-q" placeholder="${esc(placeholder||'Ara ve seç...')}" autocomplete="off"
-      oninput="comboFilter('${id}')" onfocus="comboOpen('${id}')" onblur="setTimeout(function(){comboClose('${id}')},150)">
+      oninput="comboFilter('${id}')" onfocus="comboOpen('${id}')" onblur="setTimeout(function(){comboClose('${id}')},200)">
     <input type="hidden" id="${id}">
     <div class="combo-list" id="${id}-list"></div>
   </div>`;
 }
+
 function comboInit(id, options, value, onChange){
-  comboData[id] = options;
+  comboData[id] = options || [];
   if(onChange) comboOnChangeMap[id]=onChange;
-  const sel = options.find(o=>String(o.value)===String(value));
+  const sel = (options||[]).find(o=>String(o.value)===String(value));
   const hidden = document.getElementById(id);
   const q = document.getElementById(id+'-q');
   if(hidden) hidden.value = value!=null?value:'';
   if(q) q.value = sel?sel.label:'';
 }
+
 window.comboOpen = function(id){
   const qEl = document.getElementById(id+'-q');
-  if(qEl) qEl.value = '';
-  comboFilter(id);
+  if(qEl) {
+    qEl.select();
+  }
+  comboFilter(id, true);
 };
-window.comboFilter = function(id){
+
+window.comboFilter = function(id, forceShowAll){
   const qEl = document.getElementById(id+'-q');
   const listEl = document.getElementById(id+'-list');
+  const hiddenEl = document.getElementById(id);
   if(!qEl || !listEl) return;
-  const q = qEl.value.toLowerCase();
-  const opts = (comboData[id]||[]).filter(o=> !q || o.label.toLowerCase().includes(q));
-  listEl.innerHTML = opts.slice(0,60).map(o=>`<div class="combo-opt" onmousedown="comboPick('${id}','${String(o.value).replace(/'/g,"\\'")}')">${esc(o.label)}${o.sub?`<span class="combo-sub">${esc(o.sub)}</span>`:''}</div>`).join('') || `<div class="combo-opt combo-empty">Sonuç yok</div>`;
-  listEl.style.display='block';
+
+  const allOpts = comboData[id] || [];
+  const rawQ = qEl.value || '';
+  const isSelectedAll = qEl.selectionStart === 0 && qEl.selectionEnd === rawQ.length;
+  const isOpening = forceShowAll === true || isSelectedAll;
+  const q = isOpening ? '' : rawQ;
+  const nq = trNormalize(q);
+
+  const opts = allOpts.filter(o => {
+    if (!nq) return true;
+    const nLabel = trNormalize(o.label);
+    const nSub = o.sub ? trNormalize(o.sub) : '';
+    return nLabel.includes(nq) || nSub.includes(nq);
+  });
+
+  const maxItems = 2500;
+  const shown = opts.slice(0, maxItems);
+  const currentVal = hiddenEl ? String(hiddenEl.value) : '';
+
+  let html = '';
+  if (allOpts.length > 15) {
+    html += `<div class="combo-header">
+      ${q ? `"${esc(q)}" için ${opts.length} sonuç` : `Toplam ${allOpts.length} kayıtlı seçenek`}
+    </div>`;
+  }
+
+  if (opts.length === 0) {
+    html += `<div class="combo-opt combo-empty">Sonuç bulunamadı</div>`;
+  } else {
+    html += shown.map(o => {
+      const isSel = String(o.value) === currentVal;
+      return `<div class="combo-opt ${isSel ? 'combo-selected' : ''}" onmousedown="comboPick('${id}','${String(o.value).replace(/'/g,"\\'")}')">
+        <span>${esc(o.label)}</span>
+        ${o.sub ? `<span class="combo-sub">${esc(o.sub)}</span>` : ''}
+      </div>`;
+    }).join('');
+
+    if (opts.length > maxItems) {
+      html += `<div class="combo-opt combo-empty" style="font-size:11px; background:var(--bg); border-top:1px dashed var(--line); color:var(--ink-soft);">
+        ${opts.length} sonuçtan ilk ${maxItems} tanesi listeleniyor. Aramanızı daraltabilirsiniz.
+      </div>`;
+    }
+  }
+
+  listEl.innerHTML = html;
+  listEl.style.display = 'block';
+
+  if (isOpening && currentVal) {
+    setTimeout(() => {
+      const selEl = listEl.querySelector('.combo-selected');
+      if (selEl) {
+        selEl.scrollIntoView({ block: 'nearest' });
+      }
+    }, 15);
+  }
 };
+
 window.comboPick = function(id, value){
   const opt = (comboData[id]||[]).find(o=>String(o.value)===String(value));
   const hidden = document.getElementById(id);
@@ -300,6 +370,7 @@ window.comboPick = function(id, value){
   const cb = comboOnChangeMap[id];
   if(cb) cb(value);
 };
+
 window.comboClose = function(id){
   const l=document.getElementById(id+'-list'); if(l) l.style.display='none';
   const hidden = document.getElementById(id);
@@ -611,40 +682,43 @@ function role(){ return currentUser ? currentUser.role : null; }
 function can(perm){
   const r = role();
   if(r==='Yönetici') return true;
+  if(perm==='delete' || perm==='deleteAsset' || perm==='deleteGroup' || perm==='deleteMaintenance' || perm==='deleteFault' || perm==='deleteInspection' || perm==='deleteExtMaint' || perm==='deleteCalibration' || perm==='deleteMaterial' || perm==='deletePurchase' || perm==='deleteSupplier' || perm==='deleteUser' || perm==='deleteProject') return false;
   if(r==='Teknisyen'){
+    if(perm==='deleteTask'||perm==='deleteQuote'||perm==='deleteProgressLog') return true;
     if(perm==='manageProjects'||perm==='manageTemplates'||perm==='editTemplates'||perm==='editAssets'||perm==='editGroups') return true;
     if(perm==='doMaintenance'||perm==='manageFaults'||perm==='doInspection'||perm==='doExtMaint'||perm==='doCalibration'||perm==='updateProjectProgress') return true;
-    if(perm==='editUsers') return false;
-    return true;
+    if(perm==='editUsers'||perm==='editStock') return false;
+    return false;
   }
-  if(perm==='editStock') return r==='Depo Sorumlusu';
-  if(perm==='editAssets'||perm==='editGroups'||perm==='editUsers'||perm==='manageProjects') return false;
-  if(perm==='doMaintenance'||perm==='manageFaults'||perm==='doInspection'||perm==='doExtMaint'||perm==='doCalibration'||perm==='updateProjectProgress') return r==='Teknisyen';
+  if(r==='Depo Sorumlusu'){
+    if(perm==='editStock'||perm==='deleteNeed'||perm==='deleteStockMovement') return true;
+    return false;
+  }
   return false;
 }
 
 function recalcAssetLastMaintenance(assetId){
   const recs = db.maintenanceRecords.filter(r=>r.assetId===assetId);
   const a = asset(assetId); if(!a) return;
-  if(!recs.length) return;
+  if(!recs.length){ a.lastMaintenanceDate = null; return; }
   a.lastMaintenanceDate = recs.reduce((mx,r)=> r.endDate>mx?r.endDate:mx, recs[0].endDate);
 }
 function recalcAssetLastInspection(assetId){
   const recs = db.inspectionRecords.filter(r=>(r.assetIds||[]).includes(assetId));
   const a = asset(assetId); if(!a) return;
-  if(!recs.length) return;
+  if(!recs.length){ a.lastInspectionDate = null; return; }
   a.lastInspectionDate = recs.reduce((mx,r)=> r.endDate>mx?r.endDate:mx, recs[0].endDate);
 }
 function recalcAssetLastExtMaint(assetId){
   const recs = db.extMaintRecords.filter(r=>(r.assetIds||[]).includes(assetId));
   const a = asset(assetId); if(!a) return;
-  if(!recs.length) return;
+  if(!recs.length){ a.lastExtMaintDate = null; return; }
   a.lastExtMaintDate = recs.reduce((mx,r)=> r.endDate>mx?r.endDate:mx, recs[0].endDate);
 }
 function recalcAssetLastCalibration(assetId){
   const recs = (db.calibrationRecords||[]).filter(r=>(r.assetIds||[]).includes(assetId));
   const a = asset(assetId); if(!a) return;
-  if(!recs.length) return;
+  if(!recs.length){ a.lastCalibrationDate = null; return; }
   a.lastCalibrationDate = recs.reduce((mx,r)=> r.endDate>mx?r.endDate:mx, recs[0].endDate);
 }
 function computeGroupInspectionSummary(windowDays){
@@ -1209,7 +1283,8 @@ window.renderAssetsTable = function(){
           <button class="icon" title="Geçmiş" onclick="openAssetHistory('${a.id}')">🕘</button>
           <button class="icon" title="Ekler" onclick="openAttachments('${a.id}')">📎</button>
           <button class="icon" title="Yedek Parçalar" onclick="openSpareParts('${a.id}')">🔧</button>
-          ${editable?`<button class="icon" title="Düzenle" onclick="openAssetForm('${a.id}')">✎</button><button class="icon" title="Sil" onclick="deleteAsset('${a.id}')">×</button>`:''}
+          ${editable?`<button class="icon" title="Düzenle" onclick="openAssetForm('${a.id}')">✎</button>`:''}
+          ${can('delete')?`<button class="icon" title="Sil" onclick="deleteAsset('${a.id}')">×</button>`:''}
         </td>
       </tr>`;
     }).join('') || `<tr><td colspan="7"><div class="empty">Eşleşen varlık yok.</div></td></tr>`}
@@ -1219,7 +1294,7 @@ window.deleteAsset = function(id){
   confirmDelete('Bu varlığı silmek istediğinize emin misiniz? Ekler ve yedek parça tanımları da silinecek.', async ()=>{
     db.assets = db.assets.filter(a=>a.id!==id);
     db.assets.forEach(a=>{ if(a.parentId===id) a.parentId=null; });
-    await saveDB(); renderTab();
+    await saveDB(); closeModal(); renderTab();
   });
 };
 window.exportAssets = function(){
@@ -1248,7 +1323,10 @@ window.openAssetForm = function(id){
       <div class="field"><label class="f-label" for="m-last">Son Bakım Tarihi</label><input id="m-last" type="date" value="${a&&a.lastMaintenanceDate?a.lastMaintenanceDate:''}"></div>
     </div>
     <div class="field" style="margin-top:10px;"><label class="f-label" for="m-desc">Açıklama</label><textarea id="m-desc">${a?esc(a.description||''):''}</textarea></div>
-    <div class="actions"><button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveAsset('${id||''}')">Kaydet</button></div>
+    <div class="actions">
+      ${(a && can('delete')) ? `<button class="danger" style="margin-right:auto;" onclick="deleteAsset('${id}')">Sil</button>` : ''}
+      <button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveAsset('${id||''}')">Kaydet</button>
+    </div>
   `);
   comboInit('m-group', db.assetGroups.map(g=>({value:g.id,label:g.name})), a?a.groupId:(db.assetGroups[0]&&db.assetGroups[0].id));
   comboInit('m-parent', [{value:'',label:'— Yok —'}].concat(db.assets.filter(x=>!id||x.id!==id).map(x=>({value:x.id,label:x.name}))), a?(a.parentId||''):'');
@@ -1418,7 +1496,8 @@ function renderGroups(el){
         ${g.calibrationEnabled?`<span class="badge b-warn">Kalibrasyon: ${g.calibrationPeriodDays} günde bir${g.calibrationBaselineDate ? ' (İlk: ' + fmtStr(g.calibrationBaselineDate) + ')' : ''}</span>`:''}
         <span class="muted mono tiny">${count} varlık</span>
         <div class="spacer"></div>
-        ${editable?`<button class="ghost small" onclick="openGroupForm('${g.id}')">Düzenle</button><button class="ghost small" onclick="deleteGroup('${g.id}')">Sil</button>`:''}
+        ${editable?`<button class="ghost small" onclick="openGroupForm('${g.id}')">Düzenle</button>`:''}
+        ${can('delete')?`<button class="ghost small" style="color:var(--danger); margin-left:4px;" onclick="deleteGroup('${g.id}')">Sil</button>`:''}
         </div>
         <div class="muted tiny" style="margin-top:8px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;">Kontrol Listesi</div>
         <ul style="margin:6px 0 0; padding-left:18px; font-size:13px;">${g.checklist.map(q=>`<li>${esc(q.text)}</li>`).join('') || '<li class="muted">Kontrol maddesi yok</li>'}</ul>
@@ -1487,7 +1566,10 @@ window.openGroupForm = function(id){
         <div class="muted tiny" style="margin-top:6px;">Bu tarih, henüz hiç kalibrasyonu yapılmamış varlıklar için ilk planlama tarihini belirler.</div>
       </div>
     </div>
-    <div class="actions"><button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveGroup('${id||''}')">Kaydet</button></div>
+    <div class="actions">
+      ${(g && can('delete')) ? `<button class="danger" style="margin-right:auto;" onclick="deleteGroup('${id}')">Sil</button>` : ''}
+      <button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveGroup('${id||''}')">Kaydet</button>
+    </div>
   `);
   renderChecklistRows();
 };
@@ -1603,6 +1685,7 @@ window.renderMaintBody = function(){
           <td style="white-space:nowrap;">
             <button class="ghost small" onclick="printMaintRecord('${r.id}')">🖨️ Yazdır</button>
             ${canAdd?`<button class="ghost small" onclick="openMaintForm({recordId:'${r.id}'})">Düzenle</button>`:''}
+            ${can('delete')?`<button class="ghost small" style="color:var(--danger); margin-left:4px;" onclick="deleteMaintenance('${r.id}')">Sil</button>`:''}
           </td>
         </tr>`;
       }).join('')}</tbody></table>` : `<div class="empty">Eşleşen kayıt yok.</div>`}</div>`;
@@ -1682,6 +1765,7 @@ window.openMaintForm = function(opts){
     <div class="actions">
       ${editing?`<button class="ghost" onclick="printMaintRecord('${opts.recordId}')">🖨️ Yazdır</button>`:''}
       ${(editing && can('manageTemplates')) ? `<button class="ghost" onclick="closeModal(); goTab('settings'); settingsTab='print'; designerFormTab='maint'; renderApp();" title="Bakım Form Şablonunu Düzenle">📐 Form Şablonunu Düzenle</button>` : ''}
+      ${(editing && can('delete')) ? `<button class="danger" style="margin-right:auto;" onclick="deleteMaintenance('${opts.recordId}')">Sil</button>` : ''}
       <div class="spacer"></div>
       <button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveMaintForm('${editing?opts.recordId:''}')">${editing?'Kaydet':'Bakımı Tamamla'}</button>
     </div>
@@ -1704,19 +1788,27 @@ function renderChecklistResults(){
 }
 function renderMatRows(){
   const w = document.getElementById('matUsedWrap');
+  if (!w) return;
+  const sortedMaterials = (db.materials || []).slice().sort((a,b) => (a.name || '').localeCompare(b.name || '', 'tr'));
   w.innerHTML = tempUsedMaterials.map((r,i)=>`
     <div class="mat-row">
-      ${comboHtml('mm-'+i,'Malzeme ara...')}
-      <input type="number" min="0" step="0.1" value="${r.qty}" onchange="tempUsedMaterials[${i}].qty=parseFloat(this.value)||0">
-      <button class="icon" onclick="removeMatRow(${i})">×</button>
+      ${comboHtml('mm-'+i, 'Malzeme ara ve seç (toplam ' + sortedMaterials.length + ' malzeme)...')}
+      <input type="number" min="0" step="0.1" value="${r.qty}" onchange="tempUsedMaterials[${i}].qty=parseFloat(this.value)||0" title="Kullanılan Miktar">
+      <button class="icon" onclick="removeMatRow(${i})" title="Malzemeyi kaldır">×</button>
     </div>`).join('') || `<div class="muted tiny">Malzeme kullanılmadıysa boş bırakabilirsiniz.</div>`;
   tempUsedMaterials.forEach((r,i)=>{
-    comboInit('mm-'+i, db.materials.map(m=>({value:m.id, label:m.name, sub:`${m.qty} ${m.unit} mevcut`})), r.materialId, function(val){ tempUsedMaterials[i].materialId = val; });
+    comboInit('mm-'+i, sortedMaterials.map(m=>({value:m.id, label:m.name, sub:`${m.qty} ${m.unit} mevcut`})), r.materialId, function(val){ tempUsedMaterials[i].materialId = val; });
   });
 }
 window.addMatRow = function(){
-  if(!db.materials.length){ alert('Önce Stok sekmesinden malzeme ekleyin.'); return; }
-  tempUsedMaterials.push({materialId:db.materials[0].id, qty:1}); renderMatRows();
+  if(!db.materials || !db.materials.length){ alert('Önce Stok sekmesinden malzeme ekleyin.'); return; }
+  const newIdx = tempUsedMaterials.length;
+  tempUsedMaterials.push({materialId:'', qty:1}); 
+  renderMatRows();
+  setTimeout(() => {
+    const inp = document.getElementById('mm-' + newIdx + '-q');
+    if (inp) inp.focus();
+  }, 50);
 };
 window.removeMatRow = function(i){ tempUsedMaterials.splice(i,1); renderMatRows(); };
 
@@ -1807,6 +1899,23 @@ window.saveMaintForm = async function(recordId){
       <div class="actions"><button class="ghost" onclick="closeModal()">Kapat</button><button class="primary" onclick="printMaintRecord('${newRecId}')">🖨️ Şimdi Yazdır</button></div>`);
   }
 };
+window.deleteMaintenance = function(id){
+  confirmDelete('Bu bakım kaydını silmek istediğinize emin misiniz? Kullanılan malzemeler stoka iade edilir.', async ()=>{
+    const rec = db.maintenanceRecords.find(r=>r.id===id);
+    if(rec){
+      (rec.usedMaterials||[]).forEach(u=>{
+        const m = material(u.materialId);
+        if(m) m.qty = (parseFloat(m.qty)||0) + (parseFloat(u.qty)||0);
+      });
+      for(const att of (rec.attachments||[])){
+        if(att.storageKey){ try{ await window.storage.delete(att.storageKey, true); }catch(e){} }
+      }
+      db.maintenanceRecords = db.maintenanceRecords.filter(r=>r.id!==id);
+      recalcAssetLastMaintenance(rec.assetId);
+    }
+    await saveDB(); closeModal(); renderTab();
+  });
+};
 
 // ================= MUAYENE =================
 function inspectionGroupRows(list){
@@ -1869,7 +1978,10 @@ window.renderInspectionBody = function(){
           <td class="mono">${fmtStr(r.endDate)}</td>
           <td class="mono">${fmtMoney(r.serviceCost)}</td>
           <td>${(r.certificates||[]).length?`<span class="badge b-ok"><span class="dot"></span>${r.certificates.length} dosya</span>`:`<span class="badge b-warn"><span class="dot"></span>Yok</span>`}</td>
-          <td>${canAdd?`<button class="ghost small" onclick="openInspectionForm({recordId:'${r.id}'})">Düzenle</button>`:''}</td>
+          <td style="white-space:nowrap;">
+            ${canAdd?`<button class="ghost small" onclick="openInspectionForm({recordId:'${r.id}'})">Düzenle</button>`:''}
+            ${can('delete')?`<button class="ghost small" style="color:var(--danger); margin-left:4px;" onclick="deleteInspection('${r.id}')">Sil</button>`:''}
+          </td>
         </tr>`;
       }).join('')}</tbody></table>` : `<div class="empty">Eşleşen kayıt yok.</div>`}</div>`;
   }
@@ -1947,6 +2059,7 @@ window.openInspectionForm = function(opts){
     </div>
     <div class="field" style="margin-top:12px;"><label class="f-label" for="m-inspnote">Not</label><textarea id="m-inspnote">${editing?esc(rec.notes||''):''}</textarea></div>
     <div class="actions">
+      ${(editing && can('delete')) ? `<button class="danger" style="margin-right:auto;" onclick="deleteInspection('${opts.recordId}')">Sil</button>` : ''}
       <button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveInspectionForm('${editing?opts.recordId:''}')">${editing?'Kaydet':'Muayeneyi Kaydet'}</button>
     </div>
   `);
@@ -2075,6 +2188,19 @@ window.saveInspectionForm = async function(recordId){
       <div class="actions"><button class="primary" onclick="closeModal()">Kapat</button></div>`);
   }
 };
+window.deleteInspection = function(id){
+  confirmDelete('Bu muayene kaydını silmek istediğinize emin misiniz?', async ()=>{
+    const rec = db.inspectionRecords.find(r=>r.id===id);
+    if(rec){
+      for(const cert of (rec.certificates||[])){
+        if(cert.storageKey){ try{ await window.storage.delete(cert.storageKey, true); }catch(e){} }
+      }
+      db.inspectionRecords = db.inspectionRecords.filter(r=>r.id!==id);
+      (rec.assetIds||[]).forEach(aId=> recalcAssetLastInspection(aId));
+    }
+    await saveDB(); closeModal(); renderTab();
+  });
+};
 
 // ================= DIŞ BAKIM =================
 function extMaintGroupRows(list){
@@ -2137,7 +2263,10 @@ window.renderExtMaintBody = function(){
           <td class="mono">${fmtStr(r.endDate)}</td>
           <td class="mono">${fmtMoney(r.serviceCost)}</td>
           <td>${(r.certificates||[]).length?`<span class="badge b-ok"><span class="dot"></span>${r.certificates.length} dosya</span>`:`<span class="badge b-warn"><span class="dot"></span>Yok</span>`}</td>
-          <td>${canAdd?`<button class="ghost small" onclick="openExtMaintForm({recordId:'${r.id}'})">Düzenle</button>`:''}</td>
+          <td style="white-space:nowrap;">
+            ${canAdd?`<button class="ghost small" onclick="openExtMaintForm({recordId:'${r.id}'})">Düzenle</button>`:''}
+            ${can('delete')?`<button class="ghost small" style="color:var(--danger); margin-left:4px;" onclick="deleteExtMaint('${r.id}')">Sil</button>`:''}
+          </td>
         </tr>`;
       }).join('')}</tbody></table>` : `<div class="empty">Eşleşen kayıt yok.</div>`}</div>`;
   }
@@ -2214,6 +2343,7 @@ window.openExtMaintForm = function(opts){
     </div>
     <div class="field" style="margin-top:12px;"><label class="f-label" for="m-extnote">Not</label><textarea id="m-extnote">${editing?esc(rec.notes||''):''}</textarea></div>
     <div class="actions">
+      ${(editing && can('delete')) ? `<button class="danger" style="margin-right:auto;" onclick="deleteExtMaint('${opts.recordId}')">Sil</button>` : ''}
       <button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveExtMaintForm('${editing?opts.recordId:''}')">${editing?'Kaydet':'Dış Bakımı Kaydet'}</button>
     </div>
   `);
@@ -2295,6 +2425,19 @@ window.saveExtMaintForm = async function(recordId){
       <div class="actions"><button class="primary" onclick="closeModal()">Kapat</button></div>`);
   }
 };
+window.deleteExtMaint = function(id){
+  confirmDelete('Bu dış bakım kaydını silmek istediğinize emin misiniz?', async ()=>{
+    const rec = db.extMaintRecords.find(r=>r.id===id);
+    if(rec){
+      for(const cert of (rec.certificates||[])){
+        if(cert.storageKey){ try{ await window.storage.delete(cert.storageKey, true); }catch(e){} }
+      }
+      db.extMaintRecords = db.extMaintRecords.filter(r=>r.id!==id);
+      (rec.assetIds||[]).forEach(aId=> recalcAssetLastExtMaint(aId));
+    }
+    await saveDB(); closeModal(); renderTab();
+  });
+};
 
 // ================= KALİBRASYON =================
 function calibrationGroupRows(list){
@@ -2358,7 +2501,10 @@ window.renderCalibrationBody = function(){
           <td class="mono">${fmtStr(r.endDate)}</td>
           <td class="mono">${fmtMoney(r.serviceCost)}</td>
           <td>${certCount?`<span class="badge b-ok"><span class="dot"></span>${certCount} dosya</span>`:`<span class="badge b-warn"><span class="dot"></span>Yok</span>`}</td>
-          <td>${canAdd?`<button class="ghost small" onclick="openCalibrationForm({recordId:'${r.id}'})">Düzenle</button>`:''}</td>
+          <td style="white-space:nowrap;">
+            ${canAdd?`<button class="ghost small" onclick="openCalibrationForm({recordId:'${r.id}'})">Düzenle</button>`:''}
+            ${can('delete')?`<button class="ghost small" style="color:var(--danger); margin-left:4px;" onclick="deleteCalibration('${r.id}')">Sil</button>`:''}
+          </td>
         </tr>`;
       }).join('')}</tbody></table>` : `<div class="empty">Eşleşen kayıt yok.</div>`}</div>`;
   }
@@ -2435,7 +2581,7 @@ window.openCalibrationForm = function(opts){
     </div>
     <div class="field" style="margin-top:12px;"><label class="f-label" for="m-calibnote">Not</label><textarea id="m-calibnote">${editing?esc(rec.notes||''):''}</textarea></div>
     <div class="actions">
-      ${editing?`<button class="danger" style="margin-right:auto;" onclick="deleteCalibration('${rec.id}')">Sil</button>`:''}
+      ${(editing && can('delete'))?`<button class="danger" style="margin-right:auto;" onclick="deleteCalibration('${rec.id}')">Sil</button>`:''}
       <button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveCalibrationForm('${editing?opts.recordId:''}')">${editing?'Kaydet':'Kalibrasyonu Kaydet'}</button>
     </div>
   `);
@@ -2619,6 +2765,7 @@ function faultTableHtml(list, editable){
       <td style="white-space:nowrap;">
         <button class="ghost small" onclick="printFaultRecord('${f.id}')">🖨️ Yazdır</button>
         ${editable?`<button class="ghost small" onclick="openFaultDetail('${f.id}')">${faultFilter==='open'?'Güncelle':'Düzenle'}</button>`:''}
+        ${can('delete')?`<button class="ghost small" style="color:var(--danger); margin-left:4px;" onclick="deleteFault('${f.id}')">Sil</button>`:''}
       </td>
     </tr>`;
   }).join('')}</tbody></table>`;
@@ -2676,7 +2823,10 @@ window.saveFault = async function(){
   const a = asset(assetId); if(a && a.status==='Aktif') a.status='Arızalı';
   await saveDB(); closeModal(); renderTab();
 };
-window.openFaultDetail = function(id){
+window.openFaultDetail = async function(id){
+  if(window.reloadMaterials && (!db.materials || db.materials.length === 0)){
+    try { await window.reloadMaterials(); } catch(e){}
+  }
   const f = db.faults.find(x=>x.id===id);
   const a = asset(f.assetId);
   const techs = db.users.filter(u=>u.role==='Teknisyen');
@@ -2711,6 +2861,7 @@ window.openFaultDetail = function(id){
     <div class="actions">
       <button class="ghost" onclick="printFaultRecord('${id}')">🖨️ Yazdır</button>
       ${can('manageTemplates') ? `<button class="ghost" onclick="closeModal(); goTab('settings'); settingsTab='print'; designerFormTab='fault'; renderApp();" title="Arıza Form Şablonunu Düzenle">📐 Form Şablonunu Düzenle</button>` : ''}
+      ${can('delete') ? `<button class="danger" style="margin-right:auto;" onclick="deleteFault('${id}')">Sil</button>` : ''}
       <div class="spacer"></div>
       <button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveFaultDetail('${id}')">Kaydet</button>
     </div>
@@ -2722,7 +2873,7 @@ window.openFaultDetail = function(id){
 window.saveFaultDetail = async function(id){
   const f = db.faults.find(x=>x.id===id);
   const newStatus = document.getElementById('m-fstatus').value;
-  const usedMaterials = tempUsedMaterials.filter(m=>m.qty>0).map(u=>{ const m=material(u.materialId); return {...u, unitCost: m?(m.unitCost||0):0}; });
+  const usedMaterials = tempUsedMaterials.filter(m=>m.qty>0 && m.materialId).map(u=>{ const m=material(u.materialId); return {...u, unitCost: m?(m.unitCost||0):0}; });
   applyMaterialDelta(tempOriginalUsed, usedMaterials);
   logMaterialUsageDelta(tempOriginalUsed, usedMaterials, 'Arıza: '+(f.trackingNo||''), id);
   for(const key of certsToDelete){ try{ await window.storage.delete(key, true); }catch(e){} }
@@ -2758,6 +2909,26 @@ window.saveFaultDetail = async function(id){
     openModal(`<h3>Arıza Kapatıldı</h3><p style="font-size:13px; color:var(--ink-soft);">${esc(f.trackingNo)} numaralı arıza tamamlandı olarak işaretlendi. Formu şimdi yazdırmak ister misiniz?</p>
       <div class="actions"><button class="ghost" onclick="closeModal()">Kapat</button><button class="primary" onclick="printFaultRecord('${id}')">🖨️ Şimdi Yazdır</button></div>`);
   }
+};
+window.deleteFault = function(id){
+  confirmDelete('Bu arıza kaydını silmek istediğinize emin misiniz? Kullanılan malzemeler stoka iade edilir.', async ()=>{
+    const f = db.faults.find(x=>x.id===id);
+    if(f){
+      (f.usedMaterials||[]).forEach(u=>{
+        const m = material(u.materialId);
+        if(m) m.qty = (parseFloat(m.qty)||0) + (parseFloat(u.qty)||0);
+      });
+      for(const att of (f.attachments||[])){
+        if(att.storageKey){ try{ await window.storage.delete(att.storageKey, true); }catch(e){} }
+      }
+      db.faults = db.faults.filter(x=>x.id!==id);
+      const a = asset(f.assetId);
+      if(a && !db.faults.some(other=>other.assetId===f.assetId && other.status!=='Tamamlandı')){
+        if(a.status==='Arızalı') a.status='Aktif';
+      }
+    }
+    await saveDB(); closeModal(); renderTab();
+  });
 };
 
 // ================= STOK =================
@@ -2811,8 +2982,8 @@ function renderStockMaterials(body, editable){
       <td style="white-space:nowrap;">
         ${editable?`<button class="ghost small" onclick="openStockAdjust('${m.id}','in')">+ Ekle</button>
         <button class="ghost small" onclick="openStockAdjust('${m.id}','out')">- Çıkar</button>
-        <button class="icon" onclick="openMaterialForm('${m.id}')">✎</button>
-        <button class="icon" onclick="deleteMaterial('${m.id}')">×</button>`:''}
+        <button class="icon" onclick="openMaterialForm('${m.id}')">✎</button>`:''}
+        ${can('delete')?`<button class="icon" title="Sil" onclick="deleteMaterial('${m.id}')">×</button>`:''}
       </td>
     </tr>`;
   }).join('') || `<tr><td colspan="7"><div class="empty">Eşleşen malzeme yok.</div></td></tr>`}
@@ -2824,7 +2995,10 @@ window.exportMaterials = function(){
   exportCSV('malzemeler.csv', headers, rows);
 };
 window.deleteMaterial = function(id){
-  confirmDelete('Bu malzemeyi silmek istediğinize emin misiniz?', async ()=>{ db.materials = db.materials.filter(m=>m.id!==id); await saveDB(); renderTab(); });
+  confirmDelete('Bu malzemeyi silmek istediğinize emin misiniz?', async ()=>{
+    db.materials = db.materials.filter(m=>m.id!==id);
+    await saveDB(); closeModal(); renderTab();
+  });
 };
 window.openMaterialForm = function(id){
   const m = id ? material(id) : null;
@@ -2841,7 +3015,10 @@ window.openMaterialForm = function(id){
       <div class="field"><label class="f-label">Varsayılan Tedarikçi</label>${comboHtml('m-mdefsupplier','Tedarikçi ara (opsiyonel)...')}</div>
     </div>
     <div class="muted tiny" style="margin-top:6px;">Birim maliyet, Satın Alma kaydettiğinizde alım fiyatına göre otomatik güncellenir; burada da elle düzeltebilirsiniz.</div>
-    <div class="actions"><button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveMaterial('${id||''}')">Kaydet</button></div>
+    <div class="actions">
+      ${(m && can('delete')) ? `<button class="danger" style="margin-right:auto;" onclick="deleteMaterial('${id}')">Sil</button>` : ''}
+      <button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveMaterial('${id||''}')">Kaydet</button>
+    </div>
   `);
   comboInit('m-mdefsupplier', [{value:'',label:'— Yok —'}].concat(db.suppliers.map(s=>({value:s.id,label:s.name,sub:s.paymentTerms}))), m?(m.defaultSupplierId||''):'');
 };
@@ -2922,7 +3099,7 @@ function renderStockNeeds(body, editable){
       <td class="mono">${fmtStr(n.requestedDate)}</td>
       <td style="white-space:nowrap;">
         ${editable && n.status!=='Alındı' ? `${n.materialId?`<button class="ghost small" onclick="buyForNeed('${n.id}')">Satın Al</button>`:''}${n.status==='Beklemede'?`<button class="ghost small" onclick="markNeedStatus('${n.id}','Sipariş Verildi')">Sipariş Verildi</button>`:''}`:''}
-        ${editable?`<button class="icon" onclick="deleteNeed('${n.id}')">×</button>`:''}
+        ${can('deleteNeed')?`<button class="icon" title="Sil" onclick="deleteNeed('${n.id}')">×</button>`:''}
       </td>
     </tr>`;
   }).join('') || (autoRows.length?'':`<tr><td colspan="8"><div class="empty">Eşleşen kayıt yok.</div></td></tr>`)}
@@ -3004,8 +3181,8 @@ function renderStockPurchases(body, editable){
       <td class="mono">${fmtStr(p.date)}</td>
       <td class="muted">${esc(userName(p.buyerId))}</td>
       <td style="white-space:nowrap;">
-        ${editable?`<button class="ghost small" onclick="openPurchaseForm(null,'${p.id}')">Düzenle</button>
-        <button class="icon" title="Satın Almayı Sil" onclick="deletePurchase('${p.id}')">×</button>`:''}
+        ${editable?`<button class="ghost small" onclick="openPurchaseForm(null,'${p.id}')">Düzenle</button>`:''}
+        ${can('delete')?`<button class="icon" title="Satın Almayı Sil" onclick="deletePurchase('${p.id}')">×</button>`:''}
       </td>
     </tr>`;
   }).join('') || `<tr><td colspan="9"><div class="empty">Eşleşen kayıt yok.</div></td></tr>`}
@@ -3034,7 +3211,7 @@ window.openPurchaseForm = function(prefill, editId){
     <div class="field" style="margin-top:10px;"><label class="f-label">Proje (opsiyonel)</label>${comboHtml('m-pproject','Proje ara (varsa bağlayın)...')}</div>
     <div class="field" style="margin-top:10px;"><label class="f-label" for="m-pnote">Not</label><input id="m-pnote" type="text" value="${editingP?esc(editingP.note||''):''}"></div>
     <div class="actions">
-      ${editingP ? `<button class="danger" style="margin-right:auto;" onclick="deletePurchase('${editId}')">Sil</button>` : ''}
+      ${(editingP && can('delete')) ? `<button class="danger" style="margin-right:auto;" onclick="deletePurchase('${editId}')">Sil</button>` : ''}
       <button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="savePurchase('${prefill&&prefill.needId?prefill.needId:''}','${editId||''}')">Kaydet</button>
     </div>`);
   comboInit('m-pproject', [{value:'',label:'— Yok —'}].concat(db.projects.map(pr=>({value:pr.id,label:pr.name,sub:pr.trackingNo}))), editingP?(editingP.projectId||''):'');
@@ -3107,7 +3284,7 @@ function renderStockSuppliers(body, editable){
       <td class="mono">${esc(s.phone||'—')}</td>
       <td class="muted">${esc(s.email||'—')}</td>
       <td>${s.paymentTerms?`<span class="badge b-accent"><span class="dot"></span>${esc(s.paymentTerms)}</span>`:'—'}</td>
-      <td style="white-space:nowrap;">${editable?`<button class="icon" onclick="openSupplierForm('${s.id}')">✎</button><button class="icon" onclick="deleteSupplier('${s.id}')">×</button>`:''}</td>
+      <td style="white-space:nowrap;">${editable?`<button class="icon" onclick="openSupplierForm('${s.id}')">✎</button>`:''}${can('delete')?`<button class="icon" title="Sil" onclick="deleteSupplier('${s.id}')">×</button>`:''}</td>
     </tr>`).join('') || `<tr><td colspan="6"><div class="empty">Henüz tedarikçi eklenmedi.</div></td></tr>`}
   </tbody></table></div>`;
 }
@@ -3123,7 +3300,10 @@ window.openSupplierForm = function(id){
       <div class="field"><label class="f-label" for="m-supaddress">Adres</label><input id="m-supaddress" type="text" value="${s?esc(s.address||''):''}"></div>
     </div>
     <div class="field" style="margin-top:10px;"><label class="f-label" for="m-supnotes">Not</label><textarea id="m-supnotes">${s?esc(s.notes||''):''}</textarea></div>
-    <div class="actions"><button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveSupplier('${id||''}')">Kaydet</button></div>`);
+    <div class="actions">
+      ${(s && can('delete')) ? `<button class="danger" style="margin-right:auto;" onclick="deleteSupplier('${id}')">Sil</button>` : ''}
+      <button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveSupplier('${id||''}')">Kaydet</button>
+    </div>`);
 };
 window.saveSupplier = async function(id){
   const name = document.getElementById('m-supname').value.trim();
@@ -3143,7 +3323,7 @@ window.saveSupplier = async function(id){
 window.deleteSupplier = function(id){
   confirmDelete('Bu tedarikçiyi silmek istediğinize emin misiniz? Geçmiş satın alma kayıtları etkilenmez.', async ()=>{
     db.suppliers = db.suppliers.filter(s=>s.id!==id);
-    await saveDB(); renderTab();
+    await saveDB(); closeModal(); renderTab();
   });
 };
 
@@ -3168,7 +3348,7 @@ function renderStockMovements(body, editable){
       <td class="muted">${esc(userName(mv.userId))}</td>
       <td class="muted">${esc(mv.reason||'')}</td>
       <td style="white-space:nowrap;">
-        ${editable?`<button class="icon" title="Hareketi Sil ve Stoğu Geri Al" onclick="deleteStockMovement('${mv.id}')">×</button>`:''}
+        ${can('deleteStockMovement')?`<button class="icon" title="Hareketi Sil ve Stoğu Geri Al" onclick="deleteStockMovement('${mv.id}')">×</button>`:''}
       </td>
     </tr>`;
   }).join('') || `<tr><td colspan="7"><div class="empty">Eşleşen kayıt yok.</div></td></tr>`}
@@ -3199,12 +3379,15 @@ function renderUsers(el){
       <td style="font-weight:700;">${esc(u.name)}</td>
       <td><span class="badge b-accent"><span class="dot"></span>${esc(u.role)}</span></td>
       <td>${(u.hasPassword || u.has_password || u.passwordHash)?`<span class="badge b-ok"><span class="dot"></span>Belirlendi</span>`:`<span class="badge b-warn"><span class="dot"></span>Belirlenmedi</span>`}</td>
-      <td><button class="icon" onclick="openUserForm('${u.id}')">✎</button>${u.id!==currentUser.id?`<button class="icon" onclick="deleteUser('${u.id}')">×</button>`:''}</td>
+      <td><button class="icon" onclick="openUserForm('${u.id}')">✎</button>${(u.id!==currentUser.id && can('delete'))?`<button class="icon" title="Sil" onclick="deleteUser('${u.id}')">×</button>`:''}</td>
     </tr>`).join('')}
     </tbody></table></div>`;
 }
 window.deleteUser = function(id){
-  confirmDelete('Bu kullanıcıyı silmek istediğinize emin misiniz?', async ()=>{ db.users = db.users.filter(u=>u.id!==id); await saveDB(); renderTab(); });
+  confirmDelete('Bu kullanıcıyı silmek istediğinize emin misiniz?', async ()=>{
+    db.users = db.users.filter(u=>u.id!==id);
+    await saveDB(); closeModal(); renderTab();
+  });
 };
 window.openUserForm = function(id, pwOnly){
   const u = id ? user(id) : null;
@@ -3215,7 +3398,10 @@ window.openUserForm = function(id, pwOnly){
     <div class="field" style="margin-top:10px;"><label class="f-label" for="m-urole">Rol</label><select id="m-urole">${ROLES.map(r=>`<option ${u&&u.role===r?'selected':''}>${r}</option>`).join('')}</select></div>
     `:`<input type="hidden" id="m-uname" value="${esc(u.name)}"><input type="hidden" id="m-urole" value="${esc(u.role)}">`}
     <div class="field" style="margin-top:10px;"><label class="f-label" for="m-upw">${u?'Yeni Şifre (değiştirmek için doldurun)':'Şifre'}</label><input id="m-upw" type="password"></div>
-    <div class="actions"><button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveUser('${id||''}')">Kaydet</button></div>
+    <div class="actions">
+      ${(u && !pwOnly && u.id!==currentUser.id && can('delete')) ? `<button class="danger" style="margin-right:auto;" onclick="deleteUser('${id}')">Sil</button>` : ''}
+      <button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveUser('${id||''}')">Kaydet</button>
+    </div>
   `);
 };
 window.saveUser = async function(id){
@@ -3285,7 +3471,7 @@ window.renderProjectsTable = function(){
       ${editable?`<td class="mono">${fmtMoney(p.budgetAmount)}</td><td class="mono">${fmtMoney(spent)}</td>`:''}
       <td>
         <button class="ghost small" onclick="openProjectDetail('${p.id}')">Aç</button>
-        ${editable?`<button class="ghost small" style="color:var(--danger); margin-left:4px;" onclick="deleteProject('${p.id}')">Sil</button>`:''}
+        ${can('delete')?`<button class="ghost small" style="color:var(--danger); margin-left:4px;" onclick="deleteProject('${p.id}')">Sil</button>`:''}
       </td>
     </tr>`;
   }).join('') || `<tr><td colspan="${editable?9:7}"><div class="empty">Eşleşen proje yok.</div></td></tr>`}
@@ -3309,7 +3495,10 @@ window.openProjectForm = function(id){
       <div class="field"><label class="f-label" for="m-projend">Hedef Bitiş Tarihi</label><input id="m-projend" type="date" value="${p&&p.targetEndDate?p.targetEndDate:''}"></div>
     </div>
     ${!p?`<div class="field" style="margin-top:10px;"><label class="f-label" for="m-projbudget">Başlangıç Bütçesi (₺)</label><input id="m-projbudget" type="number" step="0.01" value="0"></div>`:''}
-    <div class="actions"><button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveProjectForm('${id||''}')">Kaydet</button></div>`);
+    <div class="actions">
+      ${(p && can('delete')) ? `<button class="danger" style="margin-right:auto;" onclick="deleteProject('${id}')">Sil</button>` : ''}
+      <button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveProjectForm('${id||''}')">Kaydet</button>
+    </div>`);
   comboInit('m-projowner', db.users.map(u=>({value:u.id,label:u.name,sub:u.role})), p?(p.ownerUserId||''):currentUser.id);
 };
 window.saveProjectForm = async function(id){
@@ -3396,7 +3585,10 @@ function renderProjectDetail(el){
           <span class="badge ${prCls}"><span class="dot"></span>${esc(p.priority)}</span>
         </div>
       </div>
-      ${editable?`<div class="row"><button class="ghost small" onclick="openProjectForm('${p.id}')">✎ Düzenle</button><button class="ghost small" onclick="deleteProject('${p.id}')">Sil</button></div>`:''}
+      <div class="row">
+        ${editable?`<button class="ghost small" onclick="openProjectForm('${p.id}')">✎ Düzenle</button>`:''}
+        ${can('delete')?`<button class="ghost small" style="color:var(--danger); margin-left:4px;" onclick="deleteProject('${p.id}')">Sil</button>`:''}
+      </div>
     </div>
     <div class="tabs">${tabs.map(([k,label])=>`<button class="${activeTab===k?'active':''}" onclick="projectDetailTab='${k}'; window.projectDetailTab='${k}'; renderTab();">${label}</button>`).join('')}</div>
     <div id="projectDetailBody"></div>`;

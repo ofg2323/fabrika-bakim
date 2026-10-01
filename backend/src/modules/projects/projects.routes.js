@@ -644,8 +644,8 @@ router.delete('/:id/progress-logs/:logId', async (req, res) => {
   res.status(204).end();
 });
 
-// DELETE /api/projects/:id — Projeyi sil (Satın alma bağlantılarını güvenle koparır)
-router.delete('/:id', requireRole('Yönetici', 'Teknisyen'), async (req, res) => {
+// DELETE /api/projects/:id — Projeyi sil (Yalnızca Yönetici)
+router.delete('/:id', requireRole('Yönetici'), async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');

@@ -712,6 +712,7 @@
       try {
         await API.deleteMaterial(id);
         await reloadMaterials();
+        try { closeModal(); } catch (e) {}
         renderTab();
         window.toast.success('Malzeme silindi.');
       } catch (err) {
@@ -842,6 +843,7 @@
       try {
         await API.deleteSupplier(id);
         await reloadSuppliers();
+        try { closeModal(); } catch (e) {}
         renderTab();
         window.toast.success('Tedarikçi silindi.');
       } catch (err) {
@@ -969,6 +971,9 @@
       try {
         await API.deleteMaintenanceRecord(id);
         await reloadMaintenance();
+        await reloadMaterials();
+        await reloadAssets();
+        try { closeModal(); } catch (e) {}
         renderTab();
         window.toast.success('Bakım kaydı silindi.');
       } catch (err) {
@@ -1019,12 +1024,13 @@
   window.saveFaultDetail = async function(id) {
     const newStatus = document.getElementById('m-fstatus')?.value || 'Açık';
     const description = (document.getElementById('m-fdesc')?.value || '').trim();
-    const techSolution = (document.getElementById('m-ftechsolution')?.value || '').trim();
+    const techSolution = (document.getElementById('m-ftechsolution')?.value || document.getElementById('m-fnote')?.value || '').trim();
     const priority = document.getElementById('m-fprio')?.value || 'Orta';
-    const assignedUserId = document.getElementById('m-fassignee')?.value || null;
-    const resolvedDate = newStatus === 'Tamamlandı' ? (document.getElementById('m-fresolveddate')?.value || todayStr()) : null;
+    const assignedUserId = document.getElementById('m-fassignee')?.value || document.getElementById('m-fassign')?.value || null;
+    const resolvedDate = newStatus === 'Tamamlandı' ? (document.getElementById('m-fresolveddate')?.value || document.getElementById('m-fresolved')?.value || todayStr()) : null;
+    const externalServiceCost = parseFloat(document.getElementById('m-fextcost')?.value) || 0;
 
-    const usedMaterials = (tempUsedMaterials || []).filter(m => m.qty > 0).map(u => ({
+    const usedMaterials = (tempUsedMaterials || []).filter(m => m.qty > 0 && m.materialId).map(u => ({
       materialId: u.materialId,
       qty: u.qty,
     }));
@@ -1034,9 +1040,12 @@
         status: newStatus,
         description,
         techSolution,
+        notes: techSolution,
         priority,
         assignedUserId,
+        assignedTo: assignedUserId,
         resolvedDate,
+        externalServiceCost,
         usedMaterials,
       });
 
@@ -1074,6 +1083,9 @@
       try {
         await API.deleteFault(id);
         await reloadFaults();
+        await reloadMaterials();
+        await reloadAssets();
+        try { closeModal(); } catch (e) {}
         renderTab();
         window.toast.success('Arıza kaydı silindi.');
       } catch (err) {
@@ -1147,6 +1159,8 @@
       try {
         await API.deleteInspection(id);
         await reloadInspections();
+        await reloadAssets();
+        try { closeModal(); } catch (e) {}
         renderTab();
         window.toast.success('Muayene kaydı silindi.');
       } catch (err) {
@@ -1220,6 +1234,8 @@
       try {
         await API.deleteExtMaintenance(id);
         await reloadExtMaintenance();
+        await reloadAssets();
+        try { closeModal(); } catch (e) {}
         renderTab();
         window.toast.success('Dış bakım kaydı silindi.');
       } catch (err) {
@@ -1295,6 +1311,7 @@
         await API.deleteCalibration(id);
         await reloadCalibrations();
         await reloadAssets();
+        try { closeModal(); } catch (e) {}
         renderTab();
         window.toast.success('Kalibrasyon kaydı silindi.');
       } catch (err) {
