@@ -219,4 +219,34 @@ describe('Modül 5, 6, 7 & 8: Tedarikçi, Malzeme, Stok ve Satın Alma Testleri'
     assert.strictEqual(delRes.status, 409);
     assert.ok(delRes.data.error.includes('silinemez'));
   });
+
+  test("Manuel stok düzeltmesi 'in' ve 'out' türlerini de desteklemeli (POST /api/materials/:id/adjust)", async () => {
+    const mRes = await api('/api/materials', {
+      method: 'POST',
+      body: {
+        name: 'InOut Test Malzemesi',
+        unit: 'adet',
+        qty: 10,
+        minQty: 5,
+      },
+    }, adminToken);
+    assert.strictEqual(mRes.status, 201);
+    const testMatId = mRes.data.id;
+
+    // 'in' ile 4 ekle -> 10 + 4 = 14
+    const resIn = await api(`/api/materials/${testMatId}/adjust`, {
+      method: 'POST',
+      body: { type: 'in', qty: 4, reason: 'Test in' },
+    }, adminToken);
+    assert.strictEqual(resIn.status, 200);
+    assert.strictEqual(resIn.data.qty, 14);
+
+    // 'out' ile 2 çıkar -> 14 - 2 = 12
+    const resOut = await api(`/api/materials/${testMatId}/adjust`, {
+      method: 'POST',
+      body: { type: 'out', qty: 2, reason: 'Test out' },
+    }, adminToken);
+    assert.strictEqual(resOut.status, 200);
+    assert.strictEqual(resOut.data.qty, 12);
+  });
 });

@@ -208,9 +208,13 @@
     getMaterials(params) { return this.request(this.buildUrl('/materials', params)); },
     createMaterial(data) { return this.request('/materials', { method: 'POST', body: data }); },
     updateMaterial(id, data) { return this.request(`/materials/${id}`, { method: 'PUT', body: data }); },
-    deleteMaterial(id) { return this.request(`/materials/${id}`, { method: 'DELETE' }); },
+    deleteMaterial(id, options = {}) {
+      const url = options && options.cascade ? `/materials/${id}?cascade=true` : `/materials/${id}`;
+      return this.request(url, { method: 'DELETE' });
+    },
     adjustMaterialStock(id, type, qty, reason) {
-      return this.request(`/materials/${id}/adjust`, { method: 'POST', body: { type, qty, reason } });
+      const normalizedType = (type === 'in' || type === 'Giriş') ? 'Giriş' : 'Çıkış';
+      return this.request(`/materials/${id}/adjust`, { method: 'POST', body: { type: normalizedType, qty, reason } });
     },
 
     // Stok

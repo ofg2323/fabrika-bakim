@@ -191,7 +191,11 @@ router.post('/:id/adjust', requireRole('Yönetici', 'Depo Sorumlusu'), async (re
     return res.status(400).json({ error: 'Geçerli bir pozitif miktar girilmelidir.' });
   }
 
-  if (type !== 'Giriş' && type !== 'Çıkış') {
+  let movementType = type;
+  if (movementType === 'in') movementType = 'Giriş';
+  else if (movementType === 'out') movementType = 'Çıkış';
+
+  if (movementType !== 'Giriş' && movementType !== 'Çıkış') {
     return res.status(400).json({ error: "Hareket türü 'Giriş' veya 'Çıkış' olmalıdır." });
   }
 
@@ -210,7 +214,7 @@ router.post('/:id/adjust', requireRole('Yönetici', 'Depo Sorumlusu'), async (re
       return res.status(404).json({ error: 'Malzeme bulunamadı.' });
     }
 
-    if (type === 'Çıkış' && Number(matRows[0].qty) < adjustQty) {
+    if (movementType === 'Çıkış' && Number(matRows[0].qty) < adjustQty) {
       await client.query('ROLLBACK');
       return res.status(400).json({
         error: `Yetersiz stok. Mevcut stok: ${matRows[0].qty}, talep edilen çıkış: ${adjustQty}`,
@@ -218,7 +222,7 @@ router.post('/:id/adjust', requireRole('Yönetici', 'Depo Sorumlusu'), async (re
     }
 
     // Stok güncelle
-    const updateSql = type === 'Giriş'
+    const updateSql = movementType === 'Giriş'
       ? 'UPDATE materials SET qty = qty + $1 WHERE id = $2 RETURNING *'
       : 'UPDATE materials SET qty = qty - $1 WHERE id = $2 RETURNING *';
 
@@ -228,7 +232,7 @@ router.post('/:id/adjust', requireRole('Yönetici', 'Depo Sorumlusu'), async (re
     await client.query(
       `INSERT INTO stock_movements (material_id, type, qty, date, user_id, reason)
        VALUES ($1, $2, $3, CURRENT_DATE, $4, $5)`,
-      [req.params.id, type, adjustQty, req.user.id, reason ? reason.trim() : `Manuel ${type}`]
+      [req.params.id, movementType, adjustQty, req.user.id, reason ? reason.trim() : `Manuel ${movementType}`]
     );
 
     await logAudit(client, {
@@ -236,7 +240,7 @@ router.post('/:id/adjust', requireRole('Yönetici', 'Depo Sorumlusu'), async (re
       action: 'MATERIAL_ADJUST',
       entity: 'materials',
       entityId: req.params.id,
-      details: { type, qty: adjustQty, reason, previousQty: matRows[0].qty, newQty: updatedRows[0].qty },
+      details: { type: movementType, qty: adjustQty, reason, previousQty: matRows[0].qty, newQty: updatedRows[0].qty },
       ipAddress: getClientIp(req),
     });
 
@@ -252,27 +256,50 @@ router.post('/:id/adjust', requireRole('Yönetici', 'Depo Sorumlusu'), async (re
 
 // DELETE /api/materials/:id — Malzeme sil (Yalnızca Yönetici)
 router.delete('/:id', requireRole('Yönetici'), async (req, res) => {
+  const { cascade } = req.query;
+  const client = await pool.connect();
   try {
-    const { rows } = await pool.query('DELETE FROM materials WHERE id=$1 RETURNING id, name', [req.params.id]);
-    if (!rows[0]) return res.status(404).json({ error: 'Malzeme bulunamadı.' });
+    await client.query('BEGIN');
 
-    await logAudit(pool, {
+    const { rows: existing } = await client.query('SELECT id, name FROM materials WHERE id=$1 FOR UPDATE', [req.params.id]);
+    if (!existing[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Malzeme bulunamadı.' });
+    }
+
+    if (cascade === 'true') {
+      await client.query('DELETE FROM purchases WHERE material_id=$1', [req.params.id]);
+      await client.query('DELETE FROM maintenance_used_materials WHERE material_id=$1', [req.params.id]);
+      await client.query('DELETE FROM fault_used_materials WHERE material_id=$1', [req.params.id]);
+      await client.query('DELETE FROM stock_movements WHERE material_id=$1', [req.params.id]);
+      await client.query('DELETE FROM asset_spare_parts WHERE material_id=$1', [req.params.id]);
+      await client.query('UPDATE needs_list SET material_id=NULL WHERE material_id=$1', [req.params.id]);
+    }
+
+    const { rows } = await client.query('DELETE FROM materials WHERE id=$1 RETURNING id, name', [req.params.id]);
+
+    await logAudit(client, {
       userId: req.user.id,
       action: 'MATERIAL_DELETE',
       entity: 'materials',
       entityId: req.params.id,
-      details: { name: rows[0].name },
+      details: { name: rows[0].name, cascaded: cascade === 'true' },
       ipAddress: getClientIp(req),
     });
 
+    await client.query('COMMIT');
     res.status(204).end();
   } catch (err) {
+    await client.query('ROLLBACK');
     if (err.code === '23503') {
       return res.status(400).json({
         error: 'Bu malzeme bakım/arıza kayıtlarında, stok hareketlerinde veya satın almalarda kullanıldığı için silinemez.',
+        hasRelations: true,
       });
     }
     throw err;
+  } finally {
+    client.release();
   }
 });
 

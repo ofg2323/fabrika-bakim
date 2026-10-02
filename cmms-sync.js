@@ -716,6 +716,20 @@
         renderTab();
         window.toast.success('Malzeme silindi.');
       } catch (err) {
+        if (err.message && err.message.includes('kullanıldığı için silinemez')) {
+          confirmDelete('Bu malzemenin geçmiş satın alma, stok hareketi veya sarf kayıtları bulunmaktadır.\n\nYönetici yetkinizle bu malzemeyi ve bağlı tüm geçmiş kayıtlarını kalıcı olarak silmek istiyor musunuz?', async () => {
+            try {
+              await API.deleteMaterial(id, { cascade: true });
+              await reloadMaterials();
+              try { closeModal(); } catch (e) {}
+              renderTab();
+              window.toast.success('Malzeme ve ilişkili tüm kayıtlar silindi.');
+            } catch (cascadeErr) {
+              window.toast.error('Malzeme silinemedi: ' + cascadeErr.message);
+            }
+          });
+          return;
+        }
         window.toast.error('Malzeme silinemedi: ' + err.message);
       }
     });
@@ -726,8 +740,9 @@
     const reason = (document.getElementById('m-adjreason')?.value || '').trim();
     if (!qty || qty <= 0) { window.toast.error('Lütfen 0\'dan büyük bir miktar girin.'); return; }
 
+    const movementType = (type === 'in' || type === 'Giriş') ? 'Giriş' : 'Çıkış';
     try {
-      await API.adjustMaterialStock(materialId, type, qty, reason);
+      await API.adjustMaterialStock(materialId, movementType, qty, reason);
       await reloadMaterials();
       closeModal();
       renderTab();
