@@ -21,7 +21,7 @@ router.param('id', (req, res, next, id) => {
 // GET /api/projects — Proje listesi (harcanan bütçe ve görev sayılarıyla birlikte)
 router.get('/', async (req, res) => {
   const { status, priority, ownerUserId, q } = req.query;
-  const { limit, offset } = parsePagination(req.query, 50, 200);
+  const { limit, offset } = parsePagination(req.query, 10000, 200);
 
   let query = `
     SELECT 

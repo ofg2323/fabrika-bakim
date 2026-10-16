@@ -1,13 +1,26 @@
-const { test, describe, before } = require('node:test');
+const { test, describe, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { api, API_BASE, getAdminToken } = require('./helpers');
+const pool = require('../src/db/pool');
 
 describe('Modül 15: Güvenlik, PWA, Statik Dosyalar ve Bütünlük Testleri', () => {
   let adminToken;
+  const testFaultIds = [];
 
   before(async () => {
     const auth = await getAdminToken();
     adminToken = auth.token;
+  });
+
+  after(async () => {
+    for (const id of testFaultIds) {
+      try { await api(`/api/faults/${id}`, { method: 'DELETE' }, adminToken); } catch (_) {}
+    }
+    try {
+      await pool.query("DELETE FROM faults WHERE title LIKE '%test%'");
+      await pool.query("UPDATE assets SET status = 'Aktif' WHERE status = 'Arızalı'");
+      await pool.query("UPDATE counters SET value = 0 WHERE kind = 'fault'");
+    } catch (_) {}
   });
 
   test('Güvenlik başlıkları (Helmet) standartlara uygun olmalı', async () => {
@@ -72,6 +85,7 @@ describe('Modül 15: Güvenlik, PWA, Statik Dosyalar ve Bütünlük Testleri', (
 
     if (!faultRes.data?.id) return;
     const faultId = faultRes.data.id;
+    testFaultIds.push(faultId);
 
     // .exe dosyası yüklemeyi dene
     const formData = new FormData();
@@ -100,6 +114,7 @@ describe('Modül 15: Güvenlik, PWA, Statik Dosyalar ve Bütünlük Testleri', (
 
     if (!faultRes.data?.id) return;
     const faultId = faultRes.data.id;
+    testFaultIds.push(faultId);
 
     // Uzantısı .pdf ama içeriği sahte/zararlı metin
     const formData = new FormData();

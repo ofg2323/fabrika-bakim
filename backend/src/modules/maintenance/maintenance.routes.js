@@ -21,7 +21,7 @@ router.param('id', (req, res, next, id) => {
 // GET /api/maintenance — Bakım kayıtları listesi (arama ve filtreleme destekli)
 router.get('/', async (req, res) => {
   const { assetId, groupId, type, startDate, endDate, q } = req.query;
-  const { limit, offset } = parsePagination(req.query, 50, 200);
+  const { limit, offset } = parsePagination(req.query, 10000, 200);
 
   let query = `
     SELECT 

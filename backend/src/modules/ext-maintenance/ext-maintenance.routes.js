@@ -18,7 +18,7 @@ router.param('id', (req, res, next, id) => {
 
 // GET /api/ext-maintenance — Dış bakım kayıtları listesi (arama ve filtreleme destekli)
 router.get('/', async (req, res) => {
-  const { groupId, assetId, contractor, startDate, endDate, q, limit = 50, offset = 0 } = req.query;
+  const { groupId, assetId, contractor, startDate, endDate, q, limit = 10000, offset = 0 } = req.query;
 
   let query = `
     SELECT 
@@ -72,7 +72,7 @@ router.get('/', async (req, res) => {
   }
 
   query += ` GROUP BY em.id, ag.name, u.name ORDER BY em.end_date DESC, em.id DESC LIMIT $${paramIdx++} OFFSET $${paramIdx++}`;
-  params.push(parseInt(limit, 10) || 50, parseInt(offset, 10) || 0);
+  params.push(parseInt(limit, 10) || 10000, parseInt(offset, 10) || 0);
 
   const { rows } = await pool.query(query, params);
   res.json(rows.map(toCamelExtMaint));

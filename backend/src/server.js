@@ -128,7 +128,7 @@ app.get('/uploads/:filename', (req, res, next) => {
 
 // Frontend ve istemci varlıkları doğrudan sunulur
 const frontendDir = path.resolve(__dirname, '../../');
-app.get('/', (req, res) => {
+app.get(['/', '/fabrika-bakim.html', '/index.html'], (req, res) => {
   const fPath = path.join(frontendDir, 'fabrika-bakim.html');
   if (fs.existsSync(fPath)) return res.sendFile(fPath);
   res.json({ ok: true, message: 'Fabrika Bakım API çalışıyor.' });
@@ -137,12 +137,21 @@ app.get('/api-client.js', (req, res) => res.sendFile(path.join(frontendDir, 'api
 app.get('/cmms-sync.js', (req, res) => res.sendFile(path.join(frontendDir, 'cmms-sync.js')));
 app.get('/manifest.json', (req, res) => {
   const mPath = path.join(frontendDir, 'manifest.json');
-  if (fs.existsSync(mPath)) return res.sendFile(mPath);
+  if (fs.existsSync(mPath)) {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+    return res.sendFile(mPath);
+  }
   res.status(404).end();
 });
 app.get('/sw.js', (req, res) => {
   const sPath = path.join(frontendDir, 'sw.js');
-  if (fs.existsSync(sPath)) return res.sendFile(sPath);
+  if (fs.existsSync(sPath)) {
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Service-Worker-Allowed', '/');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    return res.sendFile(sPath);
+  }
   res.status(404).end();
 });
 app.get('/icon-192.png', (req, res) => res.sendFile(path.join(frontendDir, 'icon-192.png')));

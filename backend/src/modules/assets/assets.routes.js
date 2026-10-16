@@ -40,7 +40,7 @@ function toCamel(a) {
 
 // GET /api/assets
 router.get('/', async (req, res) => {
-  const { limit, offset } = parsePagination(req.query, 1000, 1000);
+  const { limit, offset } = parsePagination(req.query, 10000, 10000);
   const { rows } = await pool.query(
     `SELECT *, COUNT(*) OVER() AS full_count FROM assets ORDER BY name LIMIT $1 OFFSET $2`,
     [limit, offset]

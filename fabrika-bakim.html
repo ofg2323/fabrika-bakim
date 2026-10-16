@@ -4,11 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Fabrika Bakım Yönetimi</title>
-<link rel="manifest" href="manifest.json">
+<link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#1f2630">
 <link rel="icon" href="favicon.ico" sizes="any">
 <link rel="icon" href="icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="icon-192.png">
+<meta name="application-name" content="Fabrika Bakım Yönetimi">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -64,8 +65,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .topbar{display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:18px; flex-wrap:wrap; gap:10px;}
 .topbar h1{font-size:19px; margin:0; font-weight:800; letter-spacing:-0.01em;}
 .topbar .sub{color:var(--ink-soft); font-size:12.5px; margin-top:2px;}
-.kpis{display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px;}
-.kpi{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; border-left:3px solid var(--line);}
+.kpis{display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px; margin-bottom:20px;}
+.kpi{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; border-left:3px solid var(--line); transition:transform .12s ease, box-shadow .12s ease;}
+.kpi[onclick]{cursor:pointer;}
+.kpi[onclick]:hover{transform:translateY(-1px); box-shadow:0 3px 10px rgba(0,0,0,0.06);}
 .kpi.k-accent{border-left-color:var(--accent);}
 .kpi.k-danger{border-left-color:var(--danger);}
 .kpi.k-warn{border-left-color:var(--warn);}
@@ -802,7 +805,25 @@ function exportCSV(filename, headers, rows){
   document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url);
 }
 function parseCSV(text){
+  if(!text) return [];
   if(text.charCodeAt(0)===0xFEFF) text = text.slice(1);
+
+  // Ayraç otomatik tespiti (; veya , veya tab)
+  let delimiter = ';';
+  const firstLine = text.split(/\r?\n/).find(l => l.trim().length > 0) || '';
+  let semiCount = 0, commaCount = 0, tabCount = 0, inQ = false;
+  for (let i = 0; i < firstLine.length; i++) {
+    const c = firstLine[i];
+    if (c === '"') inQ = !inQ;
+    else if (!inQ) {
+      if (c === ';') semiCount++;
+      else if (c === ',') commaCount++;
+      else if (c === '\t') tabCount++;
+    }
+  }
+  if (tabCount > semiCount && tabCount > commaCount) delimiter = '\t';
+  else if (commaCount > semiCount) delimiter = ',';
+
   const rows = [];
   let row = [], field = '', inQuotes = false;
   for(let i=0;i<text.length;i++){
@@ -812,7 +833,7 @@ function parseCSV(text){
       else field += c;
     } else {
       if(c==='"') inQuotes = true;
-      else if(c===';'){ row.push(field); field=''; }
+      else if(c===delimiter){ row.push(field); field=''; }
       else if(c==='\n'){ row.push(field); rows.push(row); row=[]; field=''; }
       else if(c==='\r'){ /* skip */ }
       else field += c;
@@ -1129,18 +1150,52 @@ function renderApp(){
         <div class="role">${esc(currentUser.role)}</div>
         <button onclick="openUserForm('${currentUser.id}', true)">Şifremi Değiştir</button>
         <button onclick="logout()">Kullanıcı değiştir</button>
+        <div style="margin-top:10px; border-top:1px solid #333e4a; padding-top:8px;">
+          ${isAppInstalled() ?
+            `<div style="font-size:11.5px; color:#34d399; display:flex; align-items:center; gap:6px; justify-content:center; padding:4px 0;"><span>💻</span><span>Masaüstü Modu Aktif</span></div>` :
+            `<button onclick="installPWA()" style="background:#15803d; color:#fff; font-weight:700;"><span style="margin-right:4px;">📥</span>Masaüstüne Kur</button>`
+          }
+        </div>
       </div>
     </div>
     <div class="main">
       <div class="mobile-userbar">
         <span><b>${esc(currentUser.name)}</b> · ${esc(currentUser.role)}</span>
-        <button onclick="logout()">Kullanıcı değiştir</button>
+        <div style="display:flex; gap:6px;">
+          ${!isAppInstalled() ? `<button onclick="installPWA()" style="background:#15803d; color:#fff; padding:3px 8px; border-radius:4px; font-size:11px; border:none; cursor:pointer;">📥 Kur</button>` : ''}
+          <button onclick="logout()">Kullanıcı değiştir</button>
+        </div>
       </div>
       <div id="mainContent"></div>
     </div>
   </div>`;
   renderTab();
 }
+function isAppInstalled(){
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+window.installPWA = async function(){
+  if(window.deferredPWAInstallPrompt){
+    window.deferredPWAInstallPrompt.prompt();
+    const choice = await window.deferredPWAInstallPrompt.userChoice;
+    if(choice && choice.outcome === 'accepted'){
+      if(typeof showToast === 'function') showToast('Fabrika Bakım uygulaması başarıyla yüklendi.', 'success');
+    }
+    window.deferredPWAInstallPrompt = null;
+    renderApp();
+  } else {
+    openModal(`<h3>Masaüstü Uygulaması (PWA) Kurulumu</h3>
+      <p style="font-size:13px; color:var(--ink-soft); line-height:1.6; margin:10px 0 14px;">
+        Fabrika Bakım Yönetimi'ni masaüstünüzde bağımsız pencerede kullanmak için aşağıdaki yöntemleri kullanabilirsiniz:
+      </p>
+      <div style="background:var(--bg); border-radius:8px; padding:12px 14px; font-size:12.5px; line-height:1.6; color:var(--ink); margin-bottom:14px;">
+        <b>1. Tarayıcı Adres Çubuğu:</b> Chrome veya Edge adres çubuğunun sağ tarafındaki <b>"Uygulamayı Yükle" (⊕ / 📥)</b> simgesine tıklayın.<br>
+        <b>2. Tarayıcı Menüsü:</b> Tarayıcının sağ üst menüsünden (üç nokta <b>⋮</b>) <b>"Uygulamalar" › "Bu siteyi uygulama olarak yükle"</b> seçeneğini tıklayın.<br>
+        <b>3. Doğrudan Başlatıcı:</b> Uygulama klasöründeki <b>masaustu-baslat.bat</b> dosyasına çift tıklayarak pencere modunda doğrudan başlatabilirsiniz.
+      </div>
+      <div class="actions"><button class="primary" onclick="closeModal()">Anladım</button></div>`);
+  }
+};
 window.goTab = function(k){ currentTab=k; weekOffset=0; renderApp(); };
 window.logout = async function(){ currentUser=null; await saveSession(null); render(); };
 
@@ -1172,14 +1227,23 @@ function renderPanel(el){
   const lowStock = db.materials.filter(m=>m.qty < m.minQty);
   const inspGroups = computeGroupInspectionSummary(30);
   const extMaintGroups = computeGroupExtMaintSummary(30);
+  const calibGroups = computeGroupCalibrationSummary(30);
+
+  const totalDueInsp = inspGroups.reduce((acc, g) => acc + g.dueSoon.length, 0);
+  const hasOverdueInsp = inspGroups.some(g => g.dueSoon.some(x => daysDiff(x.due) < 0));
+
+  const totalDueCalib = calibGroups.reduce((acc, g) => acc + g.dueSoon.length, 0);
+  const hasOverdueCalib = calibGroups.some(g => g.dueSoon.some(x => daysDiff(x.due) < 0));
 
   el.innerHTML = `
-    <div class="topbar"><div><h1>Panel</h1><div class="sub">Genel durum ve haftalık bakım listesi</div></div></div>
+    <div class="topbar"><div><h1>Panel</h1><div class="sub">Genel durum ve operasyonel takip paneli</div></div></div>
     <div class="kpis">
-      <div class="kpi k-accent"><div class="n">${thisWeek.length}</div><div class="l">Bu hafta planlanan bakım</div></div>
-      <div class="kpi k-danger"><div class="n">${pending.length}</div><div class="l">Bekleyen / geciken bakım</div></div>
-      <div class="kpi k-warn"><div class="n">${openFaults.length}</div><div class="l">Açık arıza</div></div>
-      <div class="kpi ${lowStock.length?'k-danger':'k-ok'}"><div class="n">${lowStock.length}</div><div class="l">Kritik stok kalemi</div></div>
+      <div class="kpi k-accent" onclick="goTab('maint')" title="Bakımlara git"><div class="n">${thisWeek.length}</div><div class="l">Bu hafta planlanan bakım</div></div>
+      <div class="kpi ${pending.length?'k-danger':'k-ok'}" onclick="goTab('maint')" title="Geciken bakımlara git"><div class="n">${pending.length}</div><div class="l">Bekleyen / geciken bakım</div></div>
+      <div class="kpi ${openFaults.length?'k-warn':'k-ok'}" onclick="goTab('faults')" title="Arızalara git"><div class="n">${openFaults.length}</div><div class="l">Açık arıza</div></div>
+      <div class="kpi ${lowStock.length?'k-danger':'k-ok'}" onclick="goTab('stock')" title="Stoka git"><div class="n">${lowStock.length}</div><div class="l">Kritik stok kalemi</div></div>
+      <div class="kpi ${hasOverdueInsp?'k-danger':(totalDueInsp?'k-warn':'k-ok')}" onclick="goTab('inspection')" title="Muayenelere git"><div class="n">${totalDueInsp}</div><div class="l">Yaklaşan muayene (30 gün)</div></div>
+      <div class="kpi ${hasOverdueCalib?'k-danger':(totalDueCalib?'k-warn':'k-ok')}" onclick="goTab('calibration')" title="Kalibrasyonlara git"><div class="n">${totalDueCalib}</div><div class="l">Yaklaşan kalibrasyon (30 gün)</div></div>
     </div>
 
     ${pending.length?`<div class="panel">
@@ -1187,14 +1251,34 @@ function renderPanel(el){
       ${maintTableRows(pending)}
     </div>`:''}
 
-    ${extMaintGroups.length?`<div class="panel">
-      <h2 style="color:var(--warn);">Yaklaşan Dış Bakımlar (30 gün içinde)</h2>
-      ${extMaintGroupRows(extMaintGroups)}
-    </div>`:''}
+    <div class="panel">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+        <h2 style="margin:0; color:${hasOverdueInsp?'var(--danger)':(totalDueInsp?'var(--warn)':'var(--ink)')};">
+          🔍 Yaklaşan Muayeneler (30 gün içinde)
+          ${totalDueInsp ? `<span class="badge ${hasOverdueInsp?'b-danger':'b-warn'}" style="margin-left:8px;">${totalDueInsp} varlık</span>` : ''}
+        </h2>
+        <button class="ghost small" onclick="goTab('inspection')">Tüm Muayeneler ›</button>
+      </div>
+      ${inspGroups.length ? inspectionGroupRows(inspGroups) : `<div class="empty">Önümüzdeki 30 gün içinde vadesi gelen veya geciken muayene bulunmuyor.</div>`}
+    </div>
 
-    ${inspGroups.length?`<div class="panel">
-      <h2 style="color:var(--warn);">Yaklaşan Muayeneler (30 gün içinde)</h2>
-      ${inspectionGroupRows(inspGroups)}
+    <div class="panel">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+        <h2 style="margin:0; color:${hasOverdueCalib?'var(--danger)':(totalDueCalib?'var(--warn)':'var(--ink)')};">
+          📐 Yaklaşan Kalibrasyonlar (30 gün içinde)
+          ${totalDueCalib ? `<span class="badge ${hasOverdueCalib?'b-danger':'b-warn'}" style="margin-left:8px;">${totalDueCalib} varlık</span>` : ''}
+        </h2>
+        <button class="ghost small" onclick="goTab('calibration')">Tüm Kalibrasyonlar ›</button>
+      </div>
+      ${calibGroups.length ? calibrationGroupRows(calibGroups) : `<div class="empty">Önümüzdeki 30 gün içinde vadesi gelen veya geciken kalibrasyon bulunmuyor.</div>`}
+    </div>
+
+    ${extMaintGroups.length?`<div class="panel">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+        <h2 style="margin:0; color:var(--warn);">🧰 Yaklaşan Dış Bakımlar (30 gün içinde)</h2>
+        <button class="ghost small" onclick="goTab('extmaint')">Tüm Dış Bakımlar ›</button>
+      </div>
+      ${extMaintGroupRows(extMaintGroups)}
     </div>`:''}
 
     <div class="panel">
@@ -4552,44 +4636,182 @@ window.importMaterialsFile = function(inputEl){
   reader.readAsText(file, 'UTF-8');
 };
 window.downloadFaultTemplate = function(){
-  const headers=['Varlık Kodu veya Adı','Arıza Başlığı','Açıklama','Öncelik','Durum','Bildirim Tarihi (YYYY-AA-GG)','Çözüm Tarihi (YYYY-AA-GG)','Çözüm Notu','Dış Servis Maliyeti'];
-  const example=['VG-001','Rulman Aşırı Isınma','Motor rulmanında yüksek sıcaklık ve ses tespit edildi.','Yüksek','Çözüldü','2025-02-10','2025-02-11','Rulman değiştirildi ve yağlama yapıldı.','1500'];
-  exportCSV('ariza-sablonu.csv', headers, [example]);
+  const headers = [
+    'Varlık Kodu veya Adı',
+    'Arıza Başlığı',
+    'Açıklama',
+    'Öncelik (Düşük/Orta/Yüksek/Kritik)',
+    'Durum (Açık/Devam Ediyor/Tamamlandı)',
+    'Bildirim Tarihi (GG.AA.YYYY veya YYYY-AA-GG)',
+    'Çözüm Tarihi (GG.AA.YYYY veya YYYY-AA-GG)',
+    'Çözüm Notu',
+    'Dış Servis Maliyeti'
+  ];
+  const examples = [
+    ['VG-001', 'Motor Aşırı Titreşim', 'Pompa motorunda anormal titreşim ve mekanik ses tespit edildi.', 'Yüksek', 'Açık', '10.02.2025', '', '', '0'],
+    ['VG-001', 'Rulman Aşırı Isınma', 'Motor rulmanında yüksek çalışma sıcaklığı tespit edildi.', 'Orta', 'Tamamlandı', '10.02.2025', '11.02.2025', 'Rulman değiştirildi ve gresleme yapıldı.', '1500']
+  ];
+  exportCSV('ariza-sablonu.csv', headers, examples);
 };
 window.importFaultsFile = function(inputEl){
   const file = inputEl.files[0];
   if(!file) return;
+
+  function parseDate(val) {
+    if (!val) return null;
+    val = String(val).trim();
+    if (!val) return null;
+
+    // YYYY-MM-DD veya YYYY/MM/DD veya YYYY.MM.DD
+    let m = val.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+    if (m) {
+      const y = m[1];
+      const mo = m[2].padStart(2, '0');
+      const d = m[3].padStart(2, '0');
+      if (parseInt(mo, 10) >= 1 && parseInt(mo, 10) <= 12 && parseInt(d, 10) >= 1 && parseInt(d, 10) <= 31) {
+        return `${y}-${mo}-${d}`;
+      }
+    }
+
+    // Standart Türkçe/Avrupa: DD.MM.YYYY veya DD/MM/YYYY veya DD-MM-YYYY
+    m = val.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
+    if (m) {
+      const d = m[1].padStart(2, '0');
+      const mo = m[2].padStart(2, '0');
+      const y = m[3];
+      if (parseInt(mo, 10) >= 1 && parseInt(mo, 10) <= 12 && parseInt(d, 10) >= 1 && parseInt(d, 10) <= 31) {
+        return `${y}-${mo}-${d}`;
+      }
+    }
+
+    // 2 basamaklı yıl: DD.MM.YY
+    m = val.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2})$/);
+    if (m) {
+      const d = m[1].padStart(2, '0');
+      const mo = m[2].padStart(2, '0');
+      const yy = parseInt(m[3], 10);
+      const y = yy > 50 ? String(1900 + yy) : String(2000 + yy);
+      if (parseInt(mo, 10) >= 1 && parseInt(mo, 10) <= 12 && parseInt(d, 10) >= 1 && parseInt(d, 10) <= 31) {
+        return `${y}-${mo}-${d}`;
+      }
+    }
+
+    // Excel seri tarihi
+    const num = parseFloat(val);
+    if (!isNaN(num) && num > 30000 && num < 65000 && /^\d+(\.\d+)?$/.test(val)) {
+      const date = new Date(Math.round((num - 25569) * 86400 * 1000));
+      if (!isNaN(date.getTime())) {
+        const y = date.getUTCFullYear();
+        const mo = String(date.getUTCMonth() + 1).padStart(2, '0');
+        const d = String(date.getUTCDate()).padStart(2, '0');
+        return `${y}-${mo}-${d}`;
+      }
+    }
+
+    const dt = new Date(val);
+    if (!isNaN(dt.getTime())) {
+      const y = dt.getFullYear();
+      if (y >= 1990 && y <= 2100) {
+        const mo = String(dt.getMonth() + 1).padStart(2, '0');
+        const d = String(dt.getDate()).padStart(2, '0');
+        return `${y}-${mo}-${d}`;
+      }
+    }
+
+    return null;
+  }
+
   const reader = new FileReader();
   reader.onload = async function(){
     const rows = parseCSV(String(reader.result));
     if(rows.length<2){ alert('Dosyada veri satırı bulunamadı.'); inputEl.value=''; return; }
+
+    const cleanH = s => (s || '').toString().toLowerCase().replace(/[^a-z0-9ğüşıöç]/gi, '');
+    const headerRow = rows[0].map(cleanH);
+    const findIdx = (aliases, defaultIdx) => {
+      const idx = headerRow.findIndex(h => aliases.some(a => h.includes(a)));
+      return idx !== -1 ? idx : defaultIdx;
+    };
+
+    const colAsset = findIdx(['varlikkodu', 'varlikadi', 'varlik', 'asset'], 0);
+    const colTitle = findIdx(['arizabasligi', 'baslik', 'title', 'ariza'], 1);
+    const colDesc = findIdx(['aciklama', 'detay', 'description'], 2);
+    const colPrio = findIdx(['oncelik', 'priority'], 3);
+    const colStatus = findIdx(['durum', 'status', 'arizadurumu'], 4);
+    const colRepDate = findIdx(['eklemetarihi', 'bildirimtarihi', 'arizatarihi', 'kayittarihi', 'tarih', 'reporteddate'], 5);
+    const colResDate = findIdx(['cozumtarihi', 'kapanistarihi', 'tamamlanmatarihi', 'tamamlandigitarih', 'resolveddate'], 6);
+    const colNotes = findIdx(['cozumnotu', 'yapilanislem', 'not', 'notes'], 7);
+    const colCost = findIdx(['disservismaliyeti', 'maliyet', 'servisucreti', 'cost'], 8);
+
     const dataRows = rows.slice(1);
     let added=0; const errors=[];
     const items = [];
+    const assetsList = (db && db.assets) || [];
+
     dataRows.forEach((r,idx)=>{
-      const cols = r.map(c=>(c||'').trim());
-      const [assetRef, title, description, priority, status, repDate, resDate, resNotes, cost] = cols;
+      const row = r.map(c=>(c||'').trim());
+      const assetRef = (row[colAsset] || '').trim();
+      const title = (row[colTitle] || '').trim();
+      const description = (row[colDesc] || '').trim();
+      const priorityRaw = (row[colPrio] || '').trim();
+      const statusRaw = (row[colStatus] || '').trim();
+      const repDateRaw = (row[colRepDate] || '').trim();
+      const resDateRaw = (row[colResDate] || '').trim();
+      const resNotes = (row[colNotes] || '').trim();
+      const costRaw = (row[colCost] || '').trim();
+
       if(!title){ errors.push(`Satır ${idx+2}: Arıza başlığı boş, atlandı.`); return; }
+
       let a = null;
       if(assetRef){
-        a = db.assets.find(x=>(x.assetCode||'').toLowerCase()===assetRef.toLowerCase() || (x.name||'').toLowerCase()===assetRef.toLowerCase());
+        const refLower = assetRef.toLowerCase();
+        a = assetsList.find(x=>
+          (x.id && x.id.toLowerCase() === refLower) ||
+          (x.assetCode && x.assetCode.toLowerCase() === refLower) ||
+          (x.name && x.name.toLowerCase() === refLower)
+        );
+        if(!a){
+          a = assetsList.find(x=>
+            (x.assetCode && refLower.startsWith(x.assetCode.toLowerCase())) ||
+            (x.name && (refLower.includes(x.name.toLowerCase()) || x.name.toLowerCase().includes(refLower)))
+          );
+        }
       }
-      const assetId = a ? a.id : null;
-      const priorityVal = ['Düşük','Orta','Yüksek','Kritik'].includes(priority) ? priority : 'Orta';
-      const statusVal = ['Açık','İnceleniyor','Çözüldü','İptal'].includes(status) ? status : (resDate ? 'Çözüldü' : 'Açık');
-      const repDateVal = /^\d{4}-\d{2}-\d{2}$/.test(repDate||'') ? repDate : todayStr();
-      const resDateVal = /^\d{4}-\d{2}-\d{2}$/.test(resDate||'') ? resDate : (statusVal==='Çözüldü'?todayStr():null);
-      const costVal = parseFloat(cost)||0;
+
+      let priorityVal = 'Orta';
+      const pLower = priorityRaw.toLowerCase();
+      if(pLower.includes('düşük') || pLower.includes('dusuk') || pLower.includes('low')) priorityVal = 'Düşük';
+      else if(pLower.includes('kritik') || pLower.includes('yüksek') || pLower.includes('yuksek') || pLower.includes('acil')) priorityVal = 'Yüksek';
+
+      const parsedRepDate = parseDate(repDateRaw);
+      const parsedResDate = parseDate(resDateRaw);
+
+      let statusVal = 'Açık';
+      const sLower = statusRaw.toLowerCase().replace(/['"Iıİi]/g, c => (c === 'I' || c === 'ı' || c === 'İ' || c === 'i') ? 'i' : '');
+      if (['tamamlandi', 'cozuldu', 'kapandi', 'bitti', 'tamam', 'ok', 'done', 'resolved', 'closed', 'tamamlanmis'].some(k => sLower.includes(k))) {
+        statusVal = 'Tamamlandı';
+      } else if (['devam', 'inceleniyor', 'islemde', 'suruyor', 'progress'].some(k => sLower.includes(k))) {
+        statusVal = 'Devam Ediyor';
+      } else if (parsedResDate && !['acik', 'open', 'devam'].some(k => sLower.includes(k))) {
+        statusVal = 'Tamamlandı';
+      }
+
+      const repDateVal = parsedRepDate || todayStr();
+      const resDateVal = statusVal === 'Tamamlandı' ? (parsedResDate || repDateVal || todayStr()) : null;
+      const costVal = parseFloat(costRaw) || 0;
 
       items.push({
         title,
-        description: description || '',
-        assetId,
+        description,
+        assetId: a ? a.id : null,
+        assetRef: assetRef,
         priority: priorityVal,
         status: statusVal,
         reportedDate: repDateVal,
         resolvedDate: resDateVal,
-        resolutionNotes: resNotes || '',
+        notes: resNotes,
+        resolutionNotes: resNotes,
+        externalServiceCost: costVal,
         cost: costVal
       });
     });
@@ -4597,7 +4819,7 @@ window.importFaultsFile = function(inputEl){
     if(window.CMMS_API && window.CMMS_API.bulkCreateFaults){
       try{
         const res = await window.CMMS_API.bulkCreateFaults(items);
-        added = res.created || 0;
+        added = (res && (res.count !== undefined ? res.count : res.created)) || items.length;
         if(window.reloadFaults) await window.reloadFaults();
       }catch(err){
         errors.push('Sunucuya aktarırken hata: ' + (err.message||err));
@@ -4614,11 +4836,17 @@ window.importFaultsFile = function(inputEl){
           status: it.status,
           reportedDate: it.reportedDate,
           resolvedDate: it.resolvedDate,
+          notes: it.notes,
           resolutionNotes: it.resolutionNotes,
+          externalServiceCost: it.externalServiceCost,
           cost: it.cost,
           materials: [],
           actions: []
         });
+        if (it.status !== 'Tamamlandı' && it.assetId) {
+          const matchedAsset = db.assets.find(x => x.id === it.assetId);
+          if (matchedAsset && matchedAsset.status === 'Aktif') matchedAsset.status = 'Arızalı';
+        }
         added++;
       });
       await saveDB();
@@ -4641,9 +4869,25 @@ window.closeModal = function(){ document.getElementById('overlay').classList.rem
 document.getElementById('overlay').addEventListener('click', e=>{ if(e.target.id==='overlay') closeModal(); });
 window.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
 
+let deferredPWAInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  window.deferredPWAInstallPrompt = e;
+  if(typeof currentUser !== 'undefined' && currentUser && typeof renderApp === 'function'){
+    renderApp();
+  }
+});
+window.addEventListener('appinstalled', () => {
+  window.deferredPWAInstallPrompt = null;
+  if(typeof showToast === 'function') showToast('Fabrika Bakım uygulaması başarıyla yüklendi.', 'success');
+  if(typeof currentUser !== 'undefined' && currentUser && typeof renderApp === 'function'){
+    renderApp();
+  }
+});
+
 if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{
-    navigator.serviceWorker.register('sw.js').catch(()=>{ /* Sunucu üzerinden değil de dosya olarak açıldıysa sessizce yok say */ });
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(()=>{ /* Sunucu üzerinden değil de dosya olarak açıldıysa sessizce yok say */ });
   });
 }
 // boot(); çağrısı cmms-sync.js tarafından yönetilir

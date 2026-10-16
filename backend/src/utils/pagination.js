@@ -1,15 +1,23 @@
 /**
  * Güvenli sayfalama (pagination) sınır doğrulayıcı ve ayrıştırıcı
+ * İstemci belirli bir limit talep etmediğinde modül sayfalarında tüm kayıtların
+ * eksiksiz görüntülenebilmesi için varsayılan kayıt sayısı 10000 olarak ayarlanmıştır.
  * @param {object} query - req.query
  * @param {number} defaultLimit - Varsayılan kayıt sayısı
- * @param {number} maxLimit - İzin verilen maksimum kayıt sayısı
+ * @param {number} maxLimit - İzin verilen maksimum kayıt sayısı (limit parametresi verildiğinde)
  */
-function parsePagination(query = {}, defaultLimit = 50, maxLimit = 200) {
-  let limit = parseInt(query.limit, 10);
-  if (isNaN(limit) || limit < 1) {
+function parsePagination(query = {}, defaultLimit = 10000, maxLimit = 200) {
+  let limit;
+  if (query.limit !== undefined && query.limit !== null && String(query.limit).trim() !== '') {
+    limit = parseInt(query.limit, 10);
+    if (isNaN(limit) || limit < 1) {
+      limit = defaultLimit;
+    } else if (limit > maxLimit && query.all !== 'true') {
+      limit = maxLimit;
+    }
+  } else {
+    // Limit parametresi gönderilmediğinde modül sayfalarında 50 sınırını kaldır, tüm kayıtları getir
     limit = defaultLimit;
-  } else if (limit > maxLimit) {
-    limit = maxLimit;
   }
 
   let offset = parseInt(query.offset, 10);

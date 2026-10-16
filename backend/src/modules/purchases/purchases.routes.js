@@ -19,7 +19,7 @@ router.param('id', (req, res, next, id) => {
 // GET /api/purchases — Satın alma kayıtları listesi
 router.get('/', async (req, res) => {
   const { q, materialId, supplierId, projectId, startDate, endDate } = req.query;
-  const { limit, offset } = parsePagination(req.query, 50, 200);
+  const { limit, offset } = parsePagination(req.query, 10000, 200);
 
   let query = `
     SELECT p.*, 

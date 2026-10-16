@@ -10,7 +10,7 @@ router.use(requireRole('Yönetici'));
 // GET /api/audit-logs — Denetim günlüklerini listele (Yalnızca Yönetici)
 router.get('/', async (req, res) => {
   const { entityType, action, userId, startDate, endDate } = req.query;
-  const { limit, offset } = parsePagination(req.query, 50, 200);
+  const { limit, offset } = parsePagination(req.query, 10000, 200);
 
   let query = 'SELECT * FROM audit_logs WHERE 1=1';
   let countQuery = 'SELECT COUNT(*)::int AS total FROM audit_logs WHERE 1=1';

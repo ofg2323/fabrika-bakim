@@ -39,7 +39,7 @@ router.get('/summary', async (req, res) => {
 // GET /api/stock/movements — Stok hareketleri listesi (filtreleme ve arama destekli)
 router.get('/movements', async (req, res) => {
   const { materialId, type, q, startDate, endDate } = req.query;
-  const { limit, offset } = parsePagination(req.query, 50, 200);
+  const { limit, offset } = parsePagination(req.query, 10000, 200);
 
   let query = `
     SELECT sm.*, 

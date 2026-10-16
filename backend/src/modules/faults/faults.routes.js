@@ -10,6 +10,104 @@ const { logAudit, getClientIp } = require('../../utils/audit');
 const router = express.Router();
 router.use(requireAuth);
 
+function parseDateStr(val) {
+  if (!val) return null;
+  val = String(val).trim();
+  if (!val) return null;
+
+  // YYYY-MM-DD veya YYYY/MM/DD veya YYYY.MM.DD
+  let m = val.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (m) {
+    const y = m[1];
+    const mo = m[2].padStart(2, '0');
+    const d = m[3].padStart(2, '0');
+    if (parseInt(mo, 10) >= 1 && parseInt(mo, 10) <= 12 && parseInt(d, 10) >= 1 && parseInt(d, 10) <= 31) {
+      return `${y}-${mo}-${d}`;
+    }
+  }
+
+  // Standart Türkçe/Avrupa: DD.MM.YYYY veya DD/MM/YYYY veya DD-MM-YYYY
+  m = val.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
+  if (m) {
+    const d = m[1].padStart(2, '0');
+    const mo = m[2].padStart(2, '0');
+    const y = m[3];
+    if (parseInt(mo, 10) >= 1 && parseInt(mo, 10) <= 12 && parseInt(d, 10) >= 1 && parseInt(d, 10) <= 31) {
+      return `${y}-${mo}-${d}`;
+    }
+  }
+
+  // 2 basamaklı yıl: DD.MM.YY
+  m = val.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2})$/);
+  if (m) {
+    const d = m[1].padStart(2, '0');
+    const mo = m[2].padStart(2, '0');
+    const yy = parseInt(m[3], 10);
+    const y = yy > 50 ? String(1900 + yy) : String(2000 + yy);
+    if (parseInt(mo, 10) >= 1 && parseInt(mo, 10) <= 12 && parseInt(d, 10) >= 1 && parseInt(d, 10) <= 31) {
+      return `${y}-${mo}-${d}`;
+    }
+  }
+
+  // Excel seri tarihi (30000 - 65000)
+  const num = parseFloat(val);
+  if (!isNaN(num) && num > 30000 && num < 65000 && /^\d+(\.\d+)?$/.test(val)) {
+    const date = new Date(Math.round((num - 25569) * 86400 * 1000));
+    if (!isNaN(date.getTime())) {
+      const y = date.getUTCFullYear();
+      const mo = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(date.getUTCDate()).padStart(2, '0');
+      return `${y}-${mo}-${d}`;
+    }
+  }
+
+  // JS Date nesnesi fallback ayrıştırma
+  const dt = new Date(val);
+  if (!isNaN(dt.getTime())) {
+    const y = dt.getFullYear();
+    if (y >= 1990 && y <= 2100) {
+      const mo = String(dt.getMonth() + 1).padStart(2, '0');
+      const d = String(dt.getDate()).padStart(2, '0');
+      return `${y}-${mo}-${d}`;
+    }
+  }
+
+  return null;
+}
+
+function normalizeFaultStatus(rawStatus, hasResolvedDate) {
+  if (!rawStatus || typeof rawStatus !== 'string') {
+    return hasResolvedDate ? 'Tamamlandı' : 'Açık';
+  }
+  const s = rawStatus.trim().toLowerCase().replace(/['"Iıİi]/g, c => {
+    if (c === 'I' || c === 'ı') return 'i';
+    if (c === 'İ' || c === 'i') return 'i';
+    return '';
+  });
+
+  if (['tamamlandi', 'cozuldu', 'kapandi', 'bitti', 'tamam', 'ok', 'done', 'resolved', 'closed', 'tamamlanmis'].some(k => s.includes(k))) {
+    return 'Tamamlandı';
+  }
+
+  if (['devam', 'inceleniyor', 'islemde', 'suruyor', 'progress'].some(k => s.includes(k))) {
+    return 'Devam Ediyor';
+  }
+
+  if (hasResolvedDate && !['acik', 'open', 'devam'].some(k => s.includes(k))) {
+    return 'Tamamlandı';
+  }
+
+  return 'Açık';
+}
+
+function normalizeFaultPriority(rawPriority) {
+  if (!rawPriority || typeof rawPriority !== 'string') return 'Orta';
+  const p = rawPriority.trim().toLowerCase();
+  if (p.includes('düşük') || p.includes('dusuk') || p.includes('low')) return 'Düşük';
+  if (p.includes('kritik') || p.includes('yüksek') || p.includes('yuksek') || p.includes('acil') || p.includes('high')) return 'Yüksek';
+  return 'Orta';
+}
+
 router.param('id', (req, res, next, id) => {
   if (!isUuid(id)) {
     return res.status(404).json({ error: 'Arıza kaydı bulunamadı.' });
@@ -20,8 +118,8 @@ router.param('id', (req, res, next, id) => {
 
 // GET /api/faults — Arızalar listesi (filtreleme ve arama destekli)
 router.get('/', async (req, res) => {
-  const { filter, status, priority, assetId, assignedTo, q } = req.query;
-  const { limit, offset } = parsePagination(req.query, 50, 200);
+  const { filter, status, priority, assetId, assignedTo, q, all } = req.query;
+  let { limit, offset } = parsePagination(req.query, 10000, 200);
 
   let query = `
     SELECT 
@@ -160,10 +258,12 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'Varlık seçimi ve arıza başlığı zorunludur.' });
   }
 
-  const faultStatus = status && ['Açık', 'Devam Ediyor', 'Tamamlandı'].includes(status) ? status : 'Açık';
-  const faultPriority = priority && ['Düşük', 'Orta', 'Yüksek', 'Kritik'].includes(priority) ? (priority === 'Kritik' ? 'Yüksek' : priority) : 'Orta';
-  const rDate = reportedDate && /^\d{4}-\d{2}-\d{2}/.test(reportedDate) ? reportedDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
-  const resDate = resolvedDate && /^\d{4}-\d{2}-\d{2}/.test(resolvedDate) ? resolvedDate.slice(0, 10) : (faultStatus === 'Tamamlandı' ? rDate : null);
+  const parsedRepDate = parseDateStr(reportedDate);
+  const parsedResDate = parseDateStr(resolvedDate);
+  const faultStatus = normalizeFaultStatus(status, !!parsedResDate);
+  const faultPriority = normalizeFaultPriority(priority);
+  const rDate = parsedRepDate || new Date().toISOString().slice(0, 10);
+  const resDate = faultStatus === 'Tamamlandı' ? (parsedResDate || rDate) : null;
   const cost = parseFloat(externalServiceCost) || 0;
 
   const client = await pool.connect();
@@ -239,15 +339,34 @@ router.post('/bulk', requireRole('Yönetici', 'Teknisyen'), async (req, res) => 
     const created = [];
 
     for (const item of items) {
-      const { assetId, title, description, priority, assignedTo, reportedBy, reportedDate, status, resolvedDate, externalServiceCost, notes } = item;
-      if (!assetId || !title || !title.trim()) continue;
+      let { assetId, assetRef, assetCode, assetName, title, description, priority, assignedTo, reportedBy, reportedDate, status, resolvedDate, externalServiceCost, cost: itemCost, notes, resolutionNotes } = item;
+      if (!title || !title.trim()) continue;
+
+      let finalAssetId = assetId;
+      if (!finalAssetId || !isUuid(finalAssetId)) {
+        const ref = (assetRef || assetCode || assetName || assetId || '').toString().trim();
+        if (ref) {
+          const { rows: matchedAssets } = await client.query(
+            'SELECT id FROM assets WHERE asset_code ILIKE $1 OR name ILIKE $1 LIMIT 1',
+            [ref]
+          );
+          if (matchedAssets[0]) {
+            finalAssetId = matchedAssets[0].id;
+          }
+        }
+      }
+
+      if (!finalAssetId) continue;
 
       const trackingNo = await getNextTrackingNo('fault', client);
-      const faultStatus = status && ['Açık', 'Devam Ediyor', 'Tamamlandı'].includes(status) ? status : 'Açık';
-      const faultPriority = priority && ['Düşük', 'Orta', 'Yüksek', 'Kritik'].includes(priority) ? (priority === 'Kritik' ? 'Yüksek' : priority) : 'Orta';
-      const rDate = reportedDate && /^\d{4}-\d{2}-\d{2}/.test(reportedDate) ? reportedDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
-      const resDate = resolvedDate && /^\d{4}-\d{2}-\d{2}/.test(resolvedDate) ? resolvedDate.slice(0, 10) : (faultStatus === 'Tamamlandı' ? rDate : null);
-      const cost = parseFloat(externalServiceCost) || 0;
+      const parsedRepDate = parseDateStr(reportedDate);
+      const parsedResDate = parseDateStr(resolvedDate);
+      const faultStatus = normalizeFaultStatus(status, !!parsedResDate);
+      const faultPriority = normalizeFaultPriority(priority);
+      const rDate = parsedRepDate || new Date().toISOString().slice(0, 10);
+      const resDate = faultStatus === 'Tamamlandı' ? (parsedResDate || rDate) : null;
+      const finalCost = parseFloat(externalServiceCost !== undefined ? externalServiceCost : itemCost) || 0;
+      const finalNotes = (notes !== undefined ? notes : resolutionNotes) ? String(notes !== undefined ? notes : resolutionNotes).trim() : null;
 
       const { rows } = await client.query(
         `INSERT INTO faults (
@@ -257,7 +376,7 @@ router.post('/bulk', requireRole('Yönetici', 'Teknisyen'), async (req, res) => 
         RETURNING *`,
         [
           trackingNo,
-          assetId,
+          finalAssetId,
           title.trim(),
           description ? description.trim() : null,
           reportedBy || req.user.id,
@@ -266,13 +385,13 @@ router.post('/bulk', requireRole('Yönetici', 'Teknisyen'), async (req, res) => 
           faultStatus,
           assignedTo || null,
           resDate,
-          notes ? notes.trim() : null,
-          cost,
+          finalNotes,
+          finalCost,
         ]
       );
 
       if (faultStatus !== 'Tamamlandı') {
-        await client.query("UPDATE assets SET status = 'Arızalı' WHERE id = $1 AND status = 'Aktif'", [assetId]);
+        await client.query("UPDATE assets SET status = 'Arızalı' WHERE id = $1 AND status = 'Aktif'", [finalAssetId]);
       }
 
       created.push(toCamelFault(rows[0]));

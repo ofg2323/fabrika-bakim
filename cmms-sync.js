@@ -94,7 +94,7 @@
         API.getNeedsList(true),
         API.getPurchases(),
         API.getMaintenanceRecords(),
-        API.getFaults(),
+        API.getFaults({ all: 'true' }),
         API.getInspections(),
         API.getExtMaintenance(),
         API.getProjects(),
@@ -286,7 +286,7 @@
   window.reloadFaults = async function() {
     try {
       const [faults, materials, movs] = await Promise.all([
-        API.getFaults(),
+        API.getFaults({ all: 'true' }),
         API.getMaterials(),
         API.getStockMovements()
       ]);
@@ -1843,53 +1843,198 @@
   };
 
   window.downloadFaultTemplate = function() {
-    const headers = ['Varlık Kodu veya Adı', 'Arıza Başlığı', 'Açıklama', 'Öncelik', 'Durum', 'Bildirim Tarihi (YYYY-AA-GG)', 'Çözüm Tarihi (YYYY-AA-GG)', 'Çözüm Notu', 'Dış Servis Maliyeti'];
-    const example = ['VG-001', 'Rulman Aşırı Isınma', 'Motor rulmanında yüksek sıcaklık ve ses tespit edildi.', 'Yüksek', 'Çözüldü', '2025-02-10', '2025-02-11', 'Rulman değiştirildi ve yağlama yapıldı.', '1500'];
+    const headers = [
+      'Varlık Kodu veya Adı',
+      'Arıza Başlığı',
+      'Açıklama',
+      'Öncelik (Düşük/Orta/Yüksek/Kritik)',
+      'Durum (Açık/Devam Ediyor/Tamamlandı)',
+      'Bildirim Tarihi (GG.AA.YYYY veya YYYY-AA-GG)',
+      'Çözüm Tarihi (GG.AA.YYYY veya YYYY-AA-GG)',
+      'Çözüm Notu',
+      'Dış Servis Maliyeti'
+    ];
+    const examples = [
+      ['VG-001', 'Motor Aşırı Titreşim', 'Pompa motorunda anormal titreşim ve mekanik ses tespit edildi.', 'Yüksek', 'Açık', '10.02.2025', '', '', '0'],
+      ['VG-001', 'Rulman Aşırı Isınma', 'Motor rulmanında yüksek çalışma sıcaklığı tespit edildi.', 'Orta', 'Tamamlandı', '10.02.2025', '11.02.2025', 'Rulman değiştirildi ve gresleme yapıldı.', '1500']
+    ];
     if (typeof exportCSV === 'function') {
-      exportCSV('ariza-sablonu.csv', headers, [example]);
+      exportCSV('ariza-sablonu.csv', headers, examples);
     }
   };
 
   window.importFaultsFile = async function(inputEl) {
     const file = inputEl && inputEl.files && inputEl.files[0];
     if (!file) return;
+
+    function parseDate(val) {
+      if (!val) return null;
+      val = String(val).trim();
+      if (!val) return null;
+
+      // YYYY-MM-DD veya YYYY/MM/DD veya YYYY.MM.DD
+      let m = val.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+      if (m) {
+        const y = m[1];
+        const mo = m[2].padStart(2, '0');
+        const d = m[3].padStart(2, '0');
+        if (parseInt(mo, 10) >= 1 && parseInt(mo, 10) <= 12 && parseInt(d, 10) >= 1 && parseInt(d, 10) <= 31) {
+          return `${y}-${mo}-${d}`;
+        }
+      }
+
+      // Standart Türkçe/Avrupa: DD.MM.YYYY veya DD/MM/YYYY veya DD-MM-YYYY
+      m = val.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
+      if (m) {
+        const d = m[1].padStart(2, '0');
+        const mo = m[2].padStart(2, '0');
+        const y = m[3];
+        if (parseInt(mo, 10) >= 1 && parseInt(mo, 10) <= 12 && parseInt(d, 10) >= 1 && parseInt(d, 10) <= 31) {
+          return `${y}-${mo}-${d}`;
+        }
+      }
+
+      // 2 basamaklı yıl: DD.MM.YY
+      m = val.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2})$/);
+      if (m) {
+        const d = m[1].padStart(2, '0');
+        const mo = m[2].padStart(2, '0');
+        const yy = parseInt(m[3], 10);
+        const y = yy > 50 ? String(1900 + yy) : String(2000 + yy);
+        if (parseInt(mo, 10) >= 1 && parseInt(mo, 10) <= 12 && parseInt(d, 10) >= 1 && parseInt(d, 10) <= 31) {
+          return `${y}-${mo}-${d}`;
+        }
+      }
+
+      // Excel seri tarihi (30000 - 65000)
+      const num = parseFloat(val);
+      if (!isNaN(num) && num > 30000 && num < 65000 && /^\d+(\.\d+)?$/.test(val)) {
+        const date = new Date(Math.round((num - 25569) * 86400 * 1000));
+        if (!isNaN(date.getTime())) {
+          const y = date.getUTCFullYear();
+          const mo = String(date.getUTCMonth() + 1).padStart(2, '0');
+          const d = String(date.getUTCDate()).padStart(2, '0');
+          return `${y}-${mo}-${d}`;
+        }
+      }
+
+      const dt = new Date(val);
+      if (!isNaN(dt.getTime())) {
+        const y = dt.getFullYear();
+        if (y >= 1990 && y <= 2100) {
+          const mo = String(dt.getMonth() + 1).padStart(2, '0');
+          const d = String(dt.getDate()).padStart(2, '0');
+          return `${y}-${mo}-${d}`;
+        }
+      }
+
+      return null;
+    }
+
     const reader = new FileReader();
     reader.onload = async function() {
-      const rows = typeof parseCSV === 'function' ? parseCSV(String(reader.result)) : [];
+      const rawText = String(reader.result || '');
+      const rows = typeof parseCSV === 'function' ? parseCSV(rawText) : [];
       if (rows.length < 2) {
         window.toast.error('Dosyada veri satırı bulunamadı.');
         inputEl.value = '';
         return;
       }
+
+      // Başlık satırını analiz et (kolon sırasına veya ismine göre dinamik eşleme)
+      const cleanH = s => (s || '').toString().toLowerCase().replace(/[^a-z0-9ğüşıöç]/gi, '');
+      const headerRow = rows[0].map(cleanH);
+      const findIdx = (aliases, defaultIdx) => {
+        const idx = headerRow.findIndex(h => aliases.some(a => h.includes(a)));
+        return idx !== -1 ? idx : defaultIdx;
+      };
+
+      const colAsset = findIdx(['varlikkodu', 'varlikadi', 'varlik', 'asset'], 0);
+      const colTitle = findIdx(['arizabasligi', 'baslik', 'title', 'ariza'], 1);
+      const colDesc = findIdx(['aciklama', 'detay', 'description'], 2);
+      const colPrio = findIdx(['oncelik', 'priority'], 3);
+      const colStatus = findIdx(['durum', 'status', 'arizadurumu'], 4);
+      const colRepDate = findIdx(['eklemetarihi', 'bildirimtarihi', 'arizatarihi', 'kayittarihi', 'tarih', 'reporteddate'], 5);
+      const colResDate = findIdx(['cozumtarihi', 'kapanistarihi', 'tamamlanmatarihi', 'tamamlandigitarih', 'resolveddate'], 6);
+      const colNotes = findIdx(['cozumnotu', 'yapilanislem', 'not', 'notes'], 7);
+      const colCost = findIdx(['disservismaliyeti', 'maliyet', 'servisucreti', 'cost'], 8);
+
       const dataRows = rows.slice(1);
       const items = [];
       const errors = [];
+      const assetsList = (window.db && window.db.assets) || [];
       window.toast.info('Arıza kayıtları sunucuya aktarılıyor, lütfen bekleyin...');
 
       for (let idx = 0; idx < dataRows.length; idx++) {
-        const cols = dataRows[idx].map(c => (c || '').trim());
-        const [assetRef, title, description, priority, status, repDate, resDate, resNotes, cost] = cols;
-        if (!title) { errors.push(`Satır ${idx + 2}: arıza başlığı boş, atlandı.`); continue; }
+        const row = dataRows[idx].map(c => (c || '').trim());
+        const assetRef = (row[colAsset] || '').trim();
+        const title = (row[colTitle] || '').trim();
+        const description = (row[colDesc] || '').trim();
+        const priorityRaw = (row[colPrio] || '').trim();
+        const statusRaw = (row[colStatus] || '').trim();
+        const repDateRaw = (row[colRepDate] || '').trim();
+        const resDateRaw = (row[colResDate] || '').trim();
+        const resNotes = (row[colNotes] || '').trim();
+        const costRaw = (row[colCost] || '').trim();
 
-        let a = null;
-        if (assetRef && window.db && window.db.assets) {
-          a = window.db.assets.find(x => (x.assetCode || '').toLowerCase() === assetRef.toLowerCase() || (x.name || '').toLowerCase() === assetRef.toLowerCase());
+        if (!title) {
+          errors.push(`Satır ${idx + 2}: Arıza başlığı boş, atlandı.`);
+          continue;
         }
-        const priorityVal = ['Düşük', 'Orta', 'Yüksek', 'Kritik'].includes(priority) ? priority : 'Orta';
-        const statusVal = ['Açık', 'İnceleniyor', 'Çözüldü', 'İptal'].includes(status) ? status : (resDate ? 'Çözüldü' : 'Açık');
-        const repDateVal = /^\d{4}-\d{2}-\d{2}$/.test(repDate || '') ? repDate : todayStr();
-        const resDateVal = /^\d{4}-\d{2}-\d{2}$/.test(resDate || '') ? resDate : (statusVal === 'Çözüldü' ? todayStr() : null);
-        const costVal = parseFloat(cost) || 0;
+
+        // Varlık eşleme: ID, kod veya ada göre (tam ve esnek eşleşme)
+        let a = null;
+        if (assetRef) {
+          const refLower = assetRef.toLowerCase();
+          a = assetsList.find(x =>
+            (x.id && x.id.toLowerCase() === refLower) ||
+            (x.assetCode && x.assetCode.toLowerCase() === refLower) ||
+            (x.name && x.name.toLowerCase() === refLower)
+          );
+          if (!a) {
+            a = assetsList.find(x =>
+              (x.assetCode && refLower.startsWith(x.assetCode.toLowerCase())) ||
+              (x.name && (refLower.includes(x.name.toLowerCase()) || x.name.toLowerCase().includes(refLower)))
+            );
+          }
+        }
+
+        // Öncelik normalizasyonu
+        let priorityVal = 'Orta';
+        const pLower = priorityRaw.toLowerCase();
+        if (pLower.includes('düşük') || pLower.includes('dusuk') || pLower.includes('low')) priorityVal = 'Düşük';
+        else if (pLower.includes('kritik') || pLower.includes('yüksek') || pLower.includes('yuksek') || pLower.includes('acil')) priorityVal = 'Yüksek';
+
+        // Tarih ve Durum normalizasyonu
+        const parsedRepDate = parseDate(repDateRaw);
+        const parsedResDate = parseDate(resDateRaw);
+
+        let statusVal = 'Açık';
+        const sLower = statusRaw.toLowerCase().replace(/['"Iıİi]/g, c => (c === 'I' || c === 'ı' || c === 'İ' || c === 'i') ? 'i' : '');
+        if (['tamamlandi', 'cozuldu', 'kapandi', 'bitti', 'tamam', 'ok', 'done', 'resolved', 'closed', 'tamamlanmis'].some(k => sLower.includes(k))) {
+          statusVal = 'Tamamlandı';
+        } else if (['devam', 'inceleniyor', 'islemde', 'suruyor', 'progress'].some(k => sLower.includes(k))) {
+          statusVal = 'Devam Ediyor';
+        } else if (parsedResDate && !['acik', 'open', 'devam'].some(k => sLower.includes(k))) {
+          statusVal = 'Tamamlandı';
+        }
+
+        const repDateVal = parsedRepDate || todayStr();
+        const resDateVal = statusVal === 'Tamamlandı' ? (parsedResDate || repDateVal || todayStr()) : null;
+        const costVal = parseFloat(costRaw) || 0;
 
         items.push({
           title,
-          description: description || '',
+          description,
           assetId: a ? a.id : null,
+          assetRef: assetRef,
           priority: priorityVal,
           status: statusVal,
           reportedDate: repDateVal,
           resolvedDate: resDateVal,
-          resolutionNotes: resNotes || '',
+          notes: resNotes,
+          resolutionNotes: resNotes,
+          externalServiceCost: costVal,
           cost: costVal
         });
       }
@@ -1903,7 +2048,7 @@
       let added = 0;
       try {
         const res = await API.bulkCreateFaults(items);
-        added = res.created || 0;
+        added = (res && (res.count !== undefined ? res.count : res.created)) || items.length;
         await reloadFaults();
         window.toast.success(`${added} arıza kaydı başarıyla aktarıldı.`);
       } catch (err) {

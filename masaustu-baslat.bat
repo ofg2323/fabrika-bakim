@@ -3,7 +3,7 @@ title Fabrika Bakim Yonetimi (CMMS) - Masaustu Uygulamasi
 cls
 
 echo ================================================================
-echo  Fabrika Bakim Yonetimi - Masaustu Uygulama Baslatici
+echo  Fabrika Bakim Yonetimi - Masaustu Uygulama Baslatici (PWA)
 echo ================================================================
 echo.
 
@@ -28,7 +28,7 @@ if not exist "%DESKTOP_LNK%" (
   echo [BILGI] Masaustunuze "Fabrika Bakim Yonetimi" kisayolu olusturuldu.
 )
 
-:: Tarayicilari kontrol et ve Pencere Modunda (--app) ac
+:: Tarayicilari kontrol et ve Bagimsiz Pencere (PWA / App) Modunda ac
 where msedge >nul 2>nul
 if %errorlevel% equ 0 (
   start "" msedge --app=http://localhost:3001
@@ -51,8 +51,28 @@ if exist "%ProgramFiles%\Microsoft\Edge\Application\msedge.exe" (
   goto done
 )
 
+if exist "%LocalAppData%\Microsoft\Edge\Application\msedge.exe" (
+  start "" "%LocalAppData%\Microsoft\Edge\Application\msedge.exe" --app=http://localhost:3001
+  goto done
+)
+
 if exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" (
   start "" "%ProgramFiles%\Google\Chrome\Application\chrome.exe" --app=http://localhost:3001
+  goto done
+)
+
+if exist "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe" (
+  start "" "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe" --app=http://localhost:3001
+  goto done
+)
+
+if exist "%LocalAppData%\Google\Chrome\Application\chrome.exe" (
+  start "" "%LocalAppData%\Google\Chrome\Application\chrome.exe" --app=http://localhost:3001
+  goto done
+)
+
+if exist "%ProgramFiles%\BraveSoftware\Brave-Browser\Application\brave.exe" (
+  start "" "%ProgramFiles%\BraveSoftware\Brave-Browser\Application\brave.exe" --app=http://localhost:3001
   goto done
 )
 
