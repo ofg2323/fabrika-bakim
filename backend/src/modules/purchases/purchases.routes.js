@@ -221,6 +221,186 @@ router.post('/', requireRole('Yönetici', 'Depo Sorumlusu'), async (req, res) =>
   }
 });
 
+// PUT /api/purchases/:id — Satın alma kaydını düzenle (Atomik stok farkı ve hareket güncellemesi ile)
+router.put('/:id', requireRole('Yönetici', 'Depo Sorumlusu'), async (req, res) => {
+  const {
+    materialId,
+    qty,
+    unitPrice,
+    supplierId,
+    supplierText,
+    projectId,
+    date,
+    note,
+  } = req.body;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: existingRows } = await client.query(
+      'SELECT * FROM purchases WHERE id = $1 FOR UPDATE',
+      [req.params.id]
+    );
+    if (!existingRows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Satın alma kaydı bulunamadı.' });
+    }
+
+    const oldPurchase = existingRows[0];
+    const oldQty = parseFloat(oldPurchase.qty) || 0;
+    const newMaterialId = materialId || oldPurchase.material_id;
+    const newQty = qty !== undefined ? parseFloat(qty) : oldQty;
+    const newPrice = unitPrice !== undefined ? (parseFloat(unitPrice) || 0) : (parseFloat(oldPurchase.unit_price) || 0);
+
+    if (!newMaterialId || !newQty || newQty <= 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Malzeme ve geçerli bir miktar zorunludur.' });
+    }
+
+    const newTotalPrice = parseFloat((newQty * newPrice).toFixed(2));
+
+    // Eski malzemeyi kilitle
+    const { rows: oldMatRows } = await client.query(
+      'SELECT id, name, qty FROM materials WHERE id = $1 FOR UPDATE',
+      [oldPurchase.material_id]
+    );
+    if (!oldMatRows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'İlişkili malzeme bulunamadı.' });
+    }
+
+    const currentOldQty = parseFloat(oldMatRows[0].qty) || 0;
+
+    if (newMaterialId === oldPurchase.material_id) {
+      const delta = parseFloat((newQty - oldQty).toFixed(2));
+      if (currentOldQty + delta < 0) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: `Bu satın alma miktarı düşürülemez: Malzemenin bir kısmı kullanılmış. Mevcut stok (${currentOldQty}), düşülmek istenen farktan (${Math.abs(delta)}) az.`,
+        });
+      }
+      if (newPrice > 0) {
+        await client.query(
+          'UPDATE materials SET qty = qty + $1, unit_cost = $2 WHERE id = $3',
+          [delta, newPrice, newMaterialId]
+        );
+      } else {
+        await client.query(
+          'UPDATE materials SET qty = qty + $1 WHERE id = $2',
+          [delta, newMaterialId]
+        );
+      }
+    } else {
+      if (currentOldQty < oldQty) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: `Bu satın almanın malzemesi değiştirilemez: Eski malzemenin (${oldMatRows[0].name}) bir kısmı kullanılmış. Mevcut stok (${currentOldQty}), satın alma miktarından (${oldQty}) az.`,
+        });
+      }
+
+      const { rows: newMatRows } = await client.query(
+        'SELECT id, name, qty FROM materials WHERE id = $1 FOR UPDATE',
+        [newMaterialId]
+      );
+      if (!newMatRows[0]) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Yeni seçilen malzeme bulunamadı.' });
+      }
+
+      await client.query(
+        'UPDATE materials SET qty = qty - $1 WHERE id = $2',
+        [oldQty, oldPurchase.material_id]
+      );
+
+      if (newPrice > 0) {
+        await client.query(
+          'UPDATE materials SET qty = qty + $1, unit_cost = $2 WHERE id = $3',
+          [newQty, newPrice, newMaterialId]
+        );
+      } else {
+        await client.query(
+          'UPDATE materials SET qty = qty + $1 WHERE id = $2',
+          [newQty, newMaterialId]
+        );
+      }
+    }
+
+    const finalSupplierId = supplierId !== undefined ? (supplierId || null) : oldPurchase.supplier_id;
+    let finalSupplierName = supplierText !== undefined ? (supplierText || '').trim() : (oldPurchase.supplier_text || '');
+    if (!finalSupplierName && finalSupplierId) {
+      const supRes = await client.query('SELECT name FROM suppliers WHERE id=$1', [finalSupplierId]);
+      if (supRes.rows[0]) finalSupplierName = supRes.rows[0].name;
+    }
+
+    const finalProjectId = projectId !== undefined ? (projectId || null) : oldPurchase.project_id;
+    const finalNote = note !== undefined ? (note ? note.trim() : null) : oldPurchase.note;
+
+    const { rows: updatedRows } = await client.query(
+      `UPDATE purchases
+       SET material_id = $1,
+           qty = $2,
+           unit_price = $3,
+           total_price = $4,
+           supplier_id = $5,
+           supplier_text = $6,
+           project_id = $7,
+           date = COALESCE($8, date),
+           note = $9
+       WHERE id = $10
+       RETURNING *`,
+      [
+        newMaterialId,
+        newQty,
+        newPrice,
+        newTotalPrice,
+        finalSupplierId,
+        finalSupplierName || null,
+        finalProjectId,
+        date || null,
+        finalNote,
+        oldPurchase.id,
+      ]
+    );
+
+    const updatedPurchase = updatedRows[0];
+    const reasonText = `Satın alma (düzenlendi): ${finalSupplierName || '—'}`;
+    await client.query(
+      `UPDATE stock_movements
+       SET material_id = $1,
+           qty = $2,
+           date = COALESCE($3, date),
+           reason = $4
+       WHERE ref_purchase_id = $5 AND type = 'Giriş'`,
+      [newMaterialId, newQty, date || null, reasonText, oldPurchase.id]
+    );
+
+    await logAudit(client, {
+      userId: req.user.id,
+      action: 'PURCHASE_UPDATE',
+      entity: 'purchases',
+      entityId: oldPurchase.id,
+      details: {
+        materialId: newMaterialId,
+        qty: newQty,
+        unitPrice: newPrice,
+        totalPrice: newTotalPrice,
+        supplierId: finalSupplierId,
+        projectId: finalProjectId,
+      },
+      ipAddress: getClientIp(req),
+    });
+
+    await client.query('COMMIT');
+    res.json(toCamelPurchase(updatedPurchase));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+});
+
 // DELETE /api/purchases/:id — Satın alma kaydını sil ve stoğu geri al (Yalnızca Yönetici)
 // DELETE /api/purchases/:id — Satın alma kaydını iptal et/sil (Ters stok hareketi ve denetim izi ile)
 router.delete('/:id', requireRole('Yönetici'), async (req, res) => {

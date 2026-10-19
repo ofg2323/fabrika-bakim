@@ -637,6 +637,29 @@ router.post('/:id/progress-logs', async (req, res) => {
   res.status(201).json(rows[0]);
 });
 
+// PUT /api/projects/:id/progress-logs/:logId — İlerleme notunu düzenle
+router.put('/:id/progress-logs/:logId', async (req, res) => {
+  const { note, date } = req.body;
+
+  if (!note || !String(note).trim()) {
+    return res.status(400).json({ error: 'İlerleme notu boş olamaz.' });
+  }
+  if (!isUuid(req.params.logId)) {
+    return res.status(404).json({ error: 'İlerleme notu bulunamadı.' });
+  }
+
+  const { rows } = await pool.query(
+    `UPDATE project_progress_logs
+     SET note = $1, date = COALESCE($2, date)
+     WHERE id = $3 AND project_id = $4
+     RETURNING *`,
+    [String(note).trim(), date || null, req.params.logId, req.params.id]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'İlerleme notu bulunamadı.' });
+
+  res.json(rows[0]);
+});
+
 // DELETE /api/projects/:id/progress-logs/:logId — İlerleme notu sil
 router.delete('/:id/progress-logs/:logId', async (req, res) => {
   const { rows } = await pool.query('DELETE FROM project_progress_logs WHERE id = $1 AND project_id = $2 RETURNING id', [req.params.logId, req.params.id]);

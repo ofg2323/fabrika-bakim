@@ -869,6 +869,44 @@
 
   // 9. Satın Alma (Purchases) Entegrasyonu
   window.savePurchase = async function(needId, editId) {
+    // Yeni kayıtta: aynı tedarikçi altında birden fazla malzeme satırı
+    if (!editId && window.tempPurchaseLines) {
+      const lines = window.tempPurchaseLines.filter(l => l.materialId && l.qty > 0);
+      if (!lines.length) { window.toast.error('En az bir malzeme için geçerli miktar girin.'); return; }
+      const sId = document.getElementById('m-psupplierid')?.value || null;
+      const sText = (document.getElementById('m-psupplier')?.value || '').trim();
+      const pId = document.getElementById('m-pproject')?.value || null;
+      const nt = (document.getElementById('m-pnote')?.value || '').trim();
+      let done = 0;
+      try {
+        for (const l of lines) {
+          await API.createPurchase({
+            materialId: l.materialId,
+            qty: l.qty,
+            unitPrice: l.unitPrice || 0,
+            supplierId: sId,
+            supplierText: sText,
+            projectId: pId,
+            note: nt,
+            needId: done === 0 ? (needId || null) : null,
+          });
+          done++;
+        }
+        window.tempPurchaseLines = null;
+        await reloadPurchases();
+        await reloadNeeds();
+        closeModal();
+        renderTab();
+        window.toast.success(done + ' kalem satın alma işlendi ve stok artırıldı.');
+      } catch (err) {
+        await reloadPurchases();
+        await reloadNeeds();
+        renderTab();
+        window.toast.error('Satın alma kaydedilemedi (' + done + '/' + lines.length + ' kalem işlendi): ' + err.message);
+      }
+      return;
+    }
+
     const materialId = document.getElementById('m-pmat')?.value;
     const qty = parseFloat(document.getElementById('m-pqty')?.value) || 0;
     const unitPrice = parseFloat(document.getElementById('m-pprice')?.value) || 0;
@@ -972,6 +1010,7 @@
       }
 
       await reloadMaintenance();
+      await reloadAssets();
       closeModal();
       renderTab();
       window.toast.success(recordId ? 'Bakım güncellendi.' : 'Bakım başarıyla tamamlandı ve kaydedildi.');
@@ -1028,6 +1067,7 @@
       }
 
       await reloadFaults();
+      await reloadAssets();
       closeModal();
       renderTab();
       window.toast.success('Arıza bildirimi oluşturuldu.');
@@ -1085,6 +1125,7 @@
       }
 
       await reloadFaults();
+      await reloadAssets();
       closeModal();
       renderTab();
       window.toast.success('Arıza detayları güncellendi.');
@@ -1161,6 +1202,7 @@
       }
 
       await reloadInspections();
+      await reloadAssets();
       closeModal();
       renderTab();
       window.toast.success(recordId ? 'Muayene güncellendi.' : 'Muayene kaydı oluşturuldu.');
@@ -1236,6 +1278,7 @@
       }
 
       await reloadExtMaintenance();
+      await reloadAssets();
       closeModal();
       renderTab();
       window.toast.success(recordId ? 'Dış bakım güncellendi.' : 'Dış bakım kaydı oluşturuldu.');
@@ -1348,6 +1391,7 @@
     const status = document.getElementById('m-projstatus')?.value || 'Planlama';
     const startDate = document.getElementById('m-projstart')?.value || null;
     const targetEndDate = document.getElementById('m-projend')?.value || null;
+    const actualEndDate = status === 'Tamamlandı' ? (document.getElementById('m-projactual')?.value || todayStr()) : null;
     const budget = parseFloat(document.getElementById('m-projbudget')?.value) || 0;
 
     const payload = {
@@ -1358,6 +1402,7 @@
       status,
       startDate,
       targetEndDate,
+      actualEndDate,
       budget,
     };
 
@@ -1545,6 +1590,29 @@
     }
   };
   window.saveProgressLog = window.addProgressLog;
+
+  window.editProgressLog = function(projectId, logId) {
+    window.progLogEditId = logId;
+    renderTab();
+  };
+  window.cancelEditProgressLog = function() {
+    window.progLogEditId = null;
+    renderTab();
+  };
+  window.saveEditedProgressLog = async function(projectId, logId) {
+    const note = (document.getElementById('m-proglogedit-note')?.value || '').trim();
+    if (!note) { window.toast.error('İlerleme notu zorunludur.'); return; }
+    const date = document.getElementById('m-proglogedit-date')?.value || null;
+    try {
+      await API.updateProjectProgressLog(projectId, logId, { date, note });
+      window.progLogEditId = null;
+      await reloadProjects(projectId);
+      renderTab();
+      window.toast.success('İlerleme notu güncellendi.');
+    } catch (err) {
+      window.toast.error('Not güncellenemedi: ' + err.message);
+    }
+  };
 
   window.deleteProgressLog = function(projectId, logId) {
     confirmDelete('Bu ilerleme notunu silmek istediğinize emin misiniz?', async () => {
@@ -2050,6 +2118,7 @@
         const res = await API.bulkCreateFaults(items);
         added = (res && (res.count !== undefined ? res.count : res.created)) || items.length;
         await reloadFaults();
+        await reloadAssets();
         window.toast.success(`${added} arıza kaydı başarıyla aktarıldı.`);
       } catch (err) {
         errors.push('Toplu yükleme hatası: ' + err.message);

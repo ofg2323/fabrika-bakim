@@ -104,7 +104,7 @@ Uygulama; modern bir **PWA (Progressive Web App)** arayüzü, **Node.js / Expres
 - **Framework**: Express.js, `express-async-errors`.
 - **Güvenlik Kütüphaneleri**: `helmet` (CSP, başlık güvenliği), `express-rate-limit` (brute-force ve DoS engelleme), `cors`.
 - **Yetkilendirme**: `jsonwebtoken` (JWT), `bcryptjs` (şifreleme).
-- **Dosya İşleme**: `multer` (güvenli disk depolama, MIME tip kontrolü, 10MB sınır).
+- **Dosya İşleme**: `multer` (güvenli disk depolama, MIME tip kontrolü, 100MB sınır).
 
 ### Veritabanı
 - **PostgreSQL 14+**: Tüm birincil anahtarlar için `UUID` (`gen_random_uuid()`).

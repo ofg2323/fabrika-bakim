@@ -1,4 +1,7 @@
 const pool = require('../src/db/pool');
+if (pool && pool.options) {
+  pool.options.allowExitOnIdle = true;
+}
 
 const API_BASE = process.env.API_BASE || 'http://localhost:3001';
 

@@ -392,6 +392,9 @@
     deleteProjectProgressLog(projectId, logId) {
       return this.request(`/projects/${projectId}/progress-logs/${logId}`, { method: 'DELETE' });
     },
+    updateProjectProgressLog(projectId, logId, data) {
+      return this.request(`/projects/${projectId}/progress-logs/${logId}`, { method: 'PUT', body: data });
+    },
 
     // Denetim Günlüğü (Audit Logs)
     getAuditLogs(params) { return this.request(this.buildUrl('/audit-logs', params)); },

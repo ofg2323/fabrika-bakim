@@ -135,6 +135,7 @@ app.get(['/', '/fabrika-bakim.html', '/index.html'], (req, res) => {
 });
 app.get('/api-client.js', (req, res) => res.sendFile(path.join(frontendDir, 'api-client.js')));
 app.get('/cmms-sync.js', (req, res) => res.sendFile(path.join(frontendDir, 'cmms-sync.js')));
+app.get('/table-sort.js', (req, res) => res.sendFile(path.join(frontendDir, 'table-sort.js')));
 app.get('/manifest.json', (req, res) => {
   const mPath = path.join(frontendDir, 'manifest.json');
   if (fs.existsSync(mPath)) {
@@ -194,7 +195,7 @@ app.use((req, res, next) => {
 app.use((err, req, res, next) => {
   if (err.name === 'MulterError') {
     if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ error: 'Yüklenen dosya boyutu izin verilen sınırı (10 MB) aşıyor.' });
+      return res.status(400).json({ error: 'Yüklenen dosya boyutu izin verilen sınırı (100 MB) aşıyor.' });
     }
     return res.status(400).json({ error: `Dosya yükleme hatası: ${err.message}` });
   }

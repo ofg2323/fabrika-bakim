@@ -7,6 +7,7 @@ const PRECACHE_ASSETS = [
   '/manifest.json',
   '/api-client.js',
   '/cmms-sync.js',
+  '/table-sort.js',
   '/favicon.ico',
   '/icon-192.png',
   '/icon-512.png'

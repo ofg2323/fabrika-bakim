@@ -57,10 +57,10 @@ describe('Modül 19: Toplu Arıza Tarih ve Durum (Açık/Tamamlandı) Ayrımı T
       } catch (_) {}
     }
 
-    // Ek güvenlik: test arızalarının DB'de kalmadığını doğrula ve sayaç/varlık durumunu sıfırla
+    // Ek güvenlik: test arızalarının DB'de kalmadığını doğrula ve sayaç/varlık durumunu senkronla
     await pool.query("DELETE FROM faults WHERE asset_id = $1", [testAssetId]);
     await pool.query("UPDATE assets SET status = 'Aktif' WHERE id = $1", [testAssetId]);
-    await pool.query("UPDATE counters SET value = 0 WHERE kind = 'fault'");
+    await pool.query("UPDATE counters SET value = COALESCE((SELECT MAX(NULLIF(regexp_replace(tracking_no, '\\D', '', 'g'), '')::int) FROM faults), 0) WHERE kind = 'fault'");
   });
 
   test('Toplu arıza yüklemesinde Türkçe tarih formatları (DD.MM.YYYY) ve geçmiş tarihler korunmalı', async () => {

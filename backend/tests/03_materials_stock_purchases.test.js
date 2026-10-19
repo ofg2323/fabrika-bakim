@@ -170,6 +170,45 @@ describe('Modül 5, 6, 7 & 8: Tedarikçi, Malzeme, Stok ve Satın Alma Testleri'
     assert.strictEqual(updatedNeed.status, 'Alındı');
   });
 
+  test('Satın alma düzenlendiğinde stok farkı ve birim maliyet güncellenmeli (PUT /api/purchases/:id)', async () => {
+    assert.ok(purchaseId);
+    assert.ok(materialId);
+
+    // Miktarı 10'dan 15'e çıkar, birim fiyatı 95 yap -> stok 18 + 5 = 23 olmalı
+    const res1 = await api(`/api/purchases/${purchaseId}`, {
+      method: 'PUT',
+      body: {
+        materialId,
+        qty: 15,
+        unitPrice: 95,
+        supplierId,
+        note: 'Revize fatura',
+      },
+    }, adminToken);
+    assert.strictEqual(res1.status, 200);
+    assert.strictEqual(res1.data.qty, 15);
+    assert.strictEqual(res1.data.totalPrice, 1425);
+
+    const matRes1 = await api(`/api/materials/${materialId}`, {}, adminToken);
+    assert.strictEqual(matRes1.data.qty, 23);
+    assert.strictEqual(matRes1.data.unitCost, 95);
+
+    // Tekrar 10'a çek -> stok 18 olmalı
+    const res2 = await api(`/api/purchases/${purchaseId}`, {
+      method: 'PUT',
+      body: {
+        materialId,
+        qty: 10,
+        unitPrice: 92.5,
+        supplierId,
+        note: 'Faturalı alım',
+      },
+    }, adminToken);
+    assert.strictEqual(res2.status, 200);
+    const matRes2 = await api(`/api/materials/${materialId}`, {}, adminToken);
+    assert.strictEqual(matRes2.data.qty, 18);
+  });
+
   test('Satın alma silindiğinde eklenen stok otomatik geri düşülmeli (DELETE /api/purchases/:id)', async () => {
     assert.ok(purchaseId);
     assert.ok(materialId);

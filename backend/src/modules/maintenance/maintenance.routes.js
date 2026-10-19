@@ -32,13 +32,21 @@ router.get('/', async (req, res) => {
       a.group_id,
       ag.name AS group_name,
       u.name AS completed_by_name,
-      COALESCE(mat_cost.total, 0) AS materials_cost
+      COALESCE(mat_cost.total, 0) AS materials_cost,
+      COALESCE(mat_cost.items, '[]'::json) AS used_materials
     FROM maintenance_records mr
     JOIN assets a ON a.id = mr.asset_id
     LEFT JOIN asset_groups ag ON ag.id = a.group_id
     LEFT JOIN users u ON u.id = mr.completed_by
     LEFT JOIN (
-      SELECT record_id, SUM(qty * unit_cost) AS total
+      SELECT record_id, SUM(qty * unit_cost) AS total,
+        json_agg(json_build_object(
+          'id', id,
+          'materialId', material_id,
+          'qty', qty::float8,
+          'unitCost', unit_cost::float8,
+          'totalCost', (qty * unit_cost)::float8
+        )) AS items
       FROM maintenance_used_materials
       GROUP BY record_id
     ) mat_cost ON mat_cost.record_id = mr.id
