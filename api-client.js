@@ -184,12 +184,27 @@
     createAsset(data) { return this.request('/assets', { method: 'POST', body: data }); },
     updateAsset(id, data) { return this.request(`/assets/${id}`, { method: 'PUT', body: data }); },
     deleteAsset(id) { return this.request(`/assets/${id}`, { method: 'DELETE' }); },
-    uploadAssetAttachment(assetId, file, name, kind) {
+    uploadAssetAttachment(assetId, file, nameOrOpts, kind, url) {
+      let name = nameOrOpts;
+      if (nameOrOpts && typeof nameOrOpts === 'object') {
+        name = nameOrOpts.name;
+        kind = nameOrOpts.kind;
+        url = nameOrOpts.url;
+      }
+      if (kind === 'link' || !file) {
+        return this.request(`/assets/${assetId}/attachments`, {
+          method: 'POST',
+          body: { name: name || 'Bağlantı', kind: 'link', url: url || '' }
+        });
+      }
       const fd = new FormData();
-      fd.append('file', file, name || file.name || 'dosya');
+      fd.append('file', file, name || file.name || 'belge');
       if (name) fd.append('name', name);
       if (kind) fd.append('kind', kind);
       return this.request(`/assets/${assetId}/attachments`, { method: 'POST', body: fd });
+    },
+    addAssetAttachment(assetId, data) {
+      return this.uploadAssetAttachment(assetId, data?.file || null, data?.name, data?.kind, data?.url);
     },
     deleteAssetAttachment(assetId, attId) {
       return this.request(`/assets/${assetId}/attachments/${attId}`, { method: 'DELETE' });
@@ -275,12 +290,27 @@
     bulkCreateFaults(items) { return this.request('/faults/bulk', { method: 'POST', body: { items } }); },
     updateFault(id, data) { return this.request(`/faults/${id}`, { method: 'PUT', body: data }); },
     deleteFault(id) { return this.request(`/faults/${id}`, { method: 'DELETE' }); },
-    uploadFaultAttachment(faultId, file, name, kind) {
+    uploadFaultAttachment(faultId, file, nameOrOpts, kind, url) {
+      let name = nameOrOpts;
+      if (nameOrOpts && typeof nameOrOpts === 'object') {
+        name = nameOrOpts.name;
+        kind = nameOrOpts.kind;
+        url = nameOrOpts.url;
+      }
+      if (kind === 'link' || !file) {
+        return this.request(`/faults/${faultId}/attachments`, {
+          method: 'POST',
+          body: { name: name || 'Bağlantı', kind: 'link', url: url || '' }
+        });
+      }
       const fd = new FormData();
       fd.append('file', file, name || file.name || 'dosya');
       if (name) fd.append('name', name);
       if (kind) fd.append('kind', kind);
       return this.request(`/faults/${faultId}/attachments`, { method: 'POST', body: fd });
+    },
+    addFaultAttachment(faultId, data) {
+      return this.uploadFaultAttachment(faultId, data?.file || null, data?.name, data?.kind, data?.url);
     },
     deleteFaultAttachment(faultId, attId) {
       return this.request(`/faults/${faultId}/attachments/${attId}`, { method: 'DELETE' });
@@ -292,12 +322,27 @@
     createInspection(data) { return this.request('/inspections', { method: 'POST', body: data }); },
     updateInspection(id, data) { return this.request(`/inspections/${id}`, { method: 'PUT', body: data }); },
     deleteInspection(id) { return this.request(`/inspections/${id}`, { method: 'DELETE' }); },
-    uploadInspectionCertificate(inspId, file, name, kind) {
+    uploadInspectionCertificate(inspId, file, nameOrOpts, kind, url) {
+      let name = nameOrOpts;
+      if (nameOrOpts && typeof nameOrOpts === 'object') {
+        name = nameOrOpts.name;
+        kind = nameOrOpts.kind;
+        url = nameOrOpts.url;
+      }
+      if (kind === 'link' || !file) {
+        return this.request(`/inspections/${inspId}/certificates`, {
+          method: 'POST',
+          body: { name: name || 'Bağlantı', kind: 'link', url: url || '' }
+        });
+      }
       const fd = new FormData();
       fd.append('file', file, name || file.name || 'dosya');
       if (name) fd.append('name', name);
       if (kind) fd.append('kind', kind);
       return this.request(`/inspections/${inspId}/certificates`, { method: 'POST', body: fd });
+    },
+    addInspectionCertificate(inspId, data) {
+      return this.uploadInspectionCertificate(inspId, data?.file || null, data?.name, data?.kind, data?.url);
     },
     deleteInspectionCertificate(inspId, certId) {
       return this.request(`/inspections/${inspId}/certificates/${certId}`, { method: 'DELETE' });
@@ -309,15 +354,36 @@
     createExtMaintenance(data) { return this.request('/ext-maintenance', { method: 'POST', body: data }); },
     updateExtMaintenance(id, data) { return this.request(`/ext-maintenance/${id}`, { method: 'PUT', body: data }); },
     deleteExtMaintenance(id) { return this.request(`/ext-maintenance/${id}`, { method: 'DELETE' }); },
-    uploadExtMaintenanceCertificate(recId, file, name, kind) {
+    uploadExtMaintenanceCertificate(recId, file, nameOrOpts, kind, url) {
+      let name = nameOrOpts;
+      if (nameOrOpts && typeof nameOrOpts === 'object') {
+        name = nameOrOpts.name;
+        kind = nameOrOpts.kind;
+        url = nameOrOpts.url;
+      }
+      if (kind === 'link' || !file) {
+        return this.request(`/ext-maintenance/${recId}/certificates`, {
+          method: 'POST',
+          body: { name: name || 'Bağlantı', kind: 'link', url: url || '' }
+        });
+      }
       const fd = new FormData();
       fd.append('file', file, name || file.name || 'dosya');
       if (name) fd.append('name', name);
       if (kind) fd.append('kind', kind);
       return this.request(`/ext-maintenance/${recId}/certificates`, { method: 'POST', body: fd });
     },
+    uploadExtMaintCertificate(recId, file, name, kind, url) {
+      return this.uploadExtMaintenanceCertificate(recId, file, name, kind, url);
+    },
+    addExtMaintCertificate(recId, data) {
+      return this.uploadExtMaintenanceCertificate(recId, data?.file || null, data?.name, data?.kind, data?.url);
+    },
     deleteExtMaintenanceCertificate(recId, certId) {
       return this.request(`/ext-maintenance/${recId}/certificates/${certId}`, { method: 'DELETE' });
+    },
+    deleteExtMaintCertificate(recId, certId) {
+      return this.deleteExtMaintenanceCertificate(recId, certId);
     },
 
     // Kalibrasyon
@@ -409,6 +475,14 @@
       return this.request('/settings/logo', { method: 'POST', body: fd });
     },
     deleteLogo() { return this.request('/settings/logo', { method: 'DELETE' }); },
+
+    // Canlı Senkronizasyon (Live Sync)
+    getSyncVersion() { return this.request('/sync/version'); },
+    getSyncEventsUrl() {
+      const token = this.getToken();
+      const query = token ? `?token=${encodeURIComponent(token)}` : '';
+      return `${this.BASE_URL}/sync/events${query}`;
+    },
   };
 
   window.CMMS_API = API;

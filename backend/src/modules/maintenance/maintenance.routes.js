@@ -343,6 +343,16 @@ router.delete('/:id', requireRole('Yönetici'), async (req, res) => {
     // Bakım kaydını sil (ON DELETE CASCADE ile used_materials ve attachments otomatik silinir)
     await client.query('DELETE FROM maintenance_records WHERE id = $1', [rec.id]);
 
+    // Varlığın son bakım tarihini güncel kayıtlara göre yeniden hesapla
+    await client.query(
+      `UPDATE assets 
+       SET last_maintenance_date = (
+         SELECT MAX(end_date) FROM maintenance_records WHERE asset_id = $1
+       )
+       WHERE id = $1`,
+      [rec.asset_id]
+    );
+
     await logAudit(client, {
       userId: req.user.id,
       userName: req.user.name,
@@ -397,7 +407,7 @@ router.post('/:id/attachments', requireRole('Yönetici', 'Teknisyen'), upload.si
 // DELETE /api/maintenance/:id/attachments/:attId — Bakım ekini sil
 router.delete('/:id/attachments/:attId', requireRole('Yönetici', 'Teknisyen'), async (req, res) => {
   const { rows } = await pool.query(
-    'SELECT storage_key FROM maintenance_attachments WHERE id = $1 AND maintenance_id = $2',
+    'SELECT id, storage_key FROM maintenance_attachments WHERE (id::text = $1 OR storage_key = $1) AND maintenance_id = $2',
     [req.params.attId, req.params.id]
   );
 
@@ -407,7 +417,7 @@ router.delete('/:id/attachments/:attId', requireRole('Yönetici', 'Teknisyen'), 
     safeUnlink(rows[0].storage_key);
   }
 
-  await pool.query('DELETE FROM maintenance_attachments WHERE id = $1', [req.params.attId]);
+  await pool.query('DELETE FROM maintenance_attachments WHERE id = $1', [rows[0].id]);
   res.status(204).end();
 });
 

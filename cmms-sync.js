@@ -57,11 +57,137 @@
 
   // Oturum süresi dolduğunda
   window.onAuthExpired = function() {
+    stopLiveSync();
     currentUser = null;
     API.logout();
     if (window.toast) window.toast.error('Oturum süreniz doldu. Lütfen tekrar giriş yapın.');
     if (typeof renderLogin === 'function') renderLogin();
   };
+
+  // ================= CANLI SENKRONİZASYON (MULTI-DEVICE REAL-TIME SYNC) =================
+  let liveSyncEventSource = null;
+  let currentSyncVersion = null;
+  let isSyncing = false;
+  let syncPollingTimer = null;
+  let syncDebounceTimer = null;
+
+  function stopLiveSync() {
+    if (liveSyncEventSource) {
+      try { liveSyncEventSource.close(); } catch (e) {}
+      liveSyncEventSource = null;
+    }
+    if (syncPollingTimer) {
+      clearInterval(syncPollingTimer);
+      syncPollingTimer = null;
+    }
+    if (syncDebounceTimer) {
+      clearTimeout(syncDebounceTimer);
+      syncDebounceTimer = null;
+    }
+  }
+
+  function startLiveSync() {
+    if (!API.getToken()) return;
+    stopLiveSync();
+
+    // 1. Katman: Server-Sent Events (SSE) ile anlık veri değişikliği sinyali dinleme
+    try {
+      const sseUrl = API.getSyncEventsUrl();
+      liveSyncEventSource = new EventSource(sseUrl);
+
+      liveSyncEventSource.addEventListener('init', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          currentSyncVersion = data.version;
+        } catch (err) {}
+      });
+
+      liveSyncEventSource.addEventListener('change', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data.version && data.version !== currentSyncVersion) {
+            currentSyncVersion = data.version;
+            scheduleLiveSync('sse', data.details);
+          }
+        } catch (err) {}
+      });
+
+      liveSyncEventSource.onerror = () => {
+        if (liveSyncEventSource && liveSyncEventSource.readyState === EventSource.CLOSED) {
+          stopLiveSync();
+          setTimeout(startLiveSync, 5000);
+        }
+      };
+    } catch (e) {
+      console.warn('Canlı SSE bağlantısı kurulamadı, periyodik sorgulama devrede:', e);
+    }
+
+    // 2. Katman: Yedek hafif periyodik sorgulama (10 saniyede bir versiyon kontrolü)
+    syncPollingTimer = setInterval(checkSyncVersion, 10000);
+  }
+
+  async function checkSyncVersion() {
+    if (!API.getToken() || isSyncing) return;
+    try {
+      const res = await API.getSyncVersion();
+      if (res && res.version) {
+        if (currentSyncVersion === null) {
+          currentSyncVersion = res.version;
+        } else if (res.version > currentSyncVersion) {
+          currentSyncVersion = res.version;
+          scheduleLiveSync('poll');
+        }
+      }
+    } catch (err) {}
+  }
+
+  function scheduleLiveSync(source, details) {
+    if (syncDebounceTimer) clearTimeout(syncDebounceTimer);
+    syncDebounceTimer = setTimeout(() => {
+      triggerLiveSync(source, details);
+    }, 300);
+  }
+
+  async function triggerLiveSync(source, details) {
+    if (isSyncing || !API.getToken()) return;
+    isSyncing = true;
+    try {
+      await window.loadDB();
+
+      // Form doldururken veya modal açıkken kullanıcının odağını veya yazdıklarını bölme
+      const isModalOpen = document.getElementById('overlay')?.classList.contains('open');
+      const activeEl = document.activeElement;
+      const isTyping = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT');
+
+      if (!isModalOpen && !isTyping) {
+        if (typeof renderTab === 'function') {
+          renderTab();
+        } else if (typeof render === 'function') {
+          render();
+        }
+      }
+    } catch (err) {
+      console.error('Canlı senkronizasyon veri güncelleme hatası:', err);
+    } finally {
+      isSyncing = false;
+    }
+  }
+
+  // 3. Katman: Sekme / Pencere odaklandığında (Visibility & Focus) anında kontrol
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && API.getToken()) {
+      checkSyncVersion();
+    }
+  });
+
+  window.addEventListener('focus', () => {
+    if (API.getToken()) {
+      checkSyncVersion();
+    }
+  });
+
+  window.startLiveSync = startLiveSync;
+  window.stopLiveSync = stopLiveSync;
 
   // 1. Veritabanını Backend API üzerinden yükleme
   window.loadDB = async function() {
@@ -366,9 +492,11 @@
       try {
         await loadDB();
         render();
+        startLiveSync();
         return;
       } catch (e) {
         console.warn('Kayıtlı oturum geçersiz, giriş ekranına yönlendiriliyor:', e);
+        stopLiveSync();
         API.logout();
         currentUser = null;
         renderLogin();
@@ -376,6 +504,7 @@
       }
     } else {
       currentUser = null;
+      stopLiveSync();
       renderLogin();
     }
   };
@@ -472,6 +601,7 @@
 
       await loadDB();
       render();
+      startLiveSync();
     } catch (err) {
       if (errEl) errEl.textContent = err.message || 'Giriş başarısız.';
     }
@@ -494,12 +624,14 @@
 
       await loadDB();
       render();
+      startLiveSync();
     } catch (err) {
       window.toast.error('Kayıt başarısız: ' + err.message);
     }
   };
 
   window.logout = function() {
+    stopLiveSync();
     API.logout();
     currentUser = null;
     renderLogin();
@@ -593,6 +725,119 @@
     } catch (err) {
       window.toast.error('Yedek parçalar kaydedilemedi: ' + err.message);
     }
+  };
+
+  // Varlık Ekleri (Attachments) Entegrasyonu
+  window.openAttachments = async function(assetId) {
+    if (!assetId || !isUuid(assetId)) {
+      window.toast.error('Geçersiz varlık kimliği.');
+      return;
+    }
+    try {
+      const freshAsset = await API.getAsset(assetId);
+      const a = typeof asset === 'function' ? asset(assetId) : null;
+      if (a && freshAsset) {
+        a.attachments = freshAsset.attachments || [];
+      }
+    } catch (e) {
+      console.warn('Varlık ekleri güncellenemedi, yerel önbellek kullanılıyor:', e);
+    }
+    openModal(renderAttachmentsHtml(assetId));
+  };
+
+  window.uploadAttachment = async function(assetId, inputEl, kind) {
+    const file = inputEl?.files?.[0];
+    if (!file) return;
+    if (file.size > 100 * 1024 * 1024) {
+      window.toast.error('Dosya çok büyük (100 MB üzeri). Lütfen daha küçük bir dosya seçin veya bağlantı ekleyin.');
+      inputEl.value = '';
+      return;
+    }
+    try {
+      window.toast.info('Dosya yükleniyor...');
+      const uploaded = await API.uploadAssetAttachment(assetId, file, file.name, kind);
+      const a = typeof asset === 'function' ? asset(assetId) : null;
+      if (a) {
+        a.attachments = a.attachments || [];
+        a.attachments.unshift(uploaded);
+      }
+      const modalBody = document.getElementById('modalBody');
+      if (modalBody && typeof renderAttachmentsHtml === 'function') {
+        modalBody.innerHTML = renderAttachmentsHtml(assetId);
+      }
+      renderTab();
+      window.toast.success('Belge başarıyla yüklendi.');
+    } catch (err) {
+      window.toast.error('Dosya yüklenemedi: ' + err.message);
+    } finally {
+      if (inputEl) inputEl.value = '';
+    }
+  };
+
+  window.addLinkAttachment = async function(assetId) {
+    const nameEl = document.getElementById('att-link-name');
+    const urlEl = document.getElementById('att-link-url');
+    const name = (nameEl?.value || '').trim();
+    const url = (urlEl?.value || '').trim();
+    if (!name || !url) {
+      window.toast.error('Bağlantı adı ve adresi zorunludur.');
+      return;
+    }
+    try {
+      const uploaded = await API.addAssetAttachment(assetId, { name, kind: 'link', url });
+      const a = typeof asset === 'function' ? asset(assetId) : null;
+      if (a) {
+        a.attachments = a.attachments || [];
+        a.attachments.unshift(uploaded);
+      }
+      const modalBody = document.getElementById('modalBody');
+      if (modalBody && typeof renderAttachmentsHtml === 'function') {
+        modalBody.innerHTML = renderAttachmentsHtml(assetId);
+      }
+      renderTab();
+      window.toast.success('Bağlantı eklendi.');
+    } catch (err) {
+      window.toast.error('Bağlantı eklenemedi: ' + err.message);
+    }
+  };
+
+  window.viewAttachment = function(assetId, attId) {
+    const a = typeof asset === 'function' ? asset(assetId) : null;
+    const att = (a?.attachments || []).find(x => x.id === attId || x.storageKey === attId);
+    if (!att) {
+      window.toast.error('Ek bulunamadı.');
+      return;
+    }
+    if (att.kind === 'link' || att.url) {
+      const url = typeof window.safeUrl === 'function' ? window.safeUrl(att.url) : att.url;
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    if (att.storageKey) {
+      window.viewCertificate(att.storageKey);
+    } else {
+      window.toast.error('Dosya anahtarı bulunamadı.');
+    }
+  };
+
+  window.deleteAttachment = function(assetId, attId) {
+    confirmDelete('Bu eki silmek istediğinize emin misiniz?', async () => {
+      try {
+        await API.deleteAssetAttachment(assetId, attId);
+        const a = typeof asset === 'function' ? asset(assetId) : null;
+        if (a) {
+          a.attachments = (a.attachments || []).filter(x => x.id !== attId && x.storageKey !== attId);
+        }
+        const modalBody = document.getElementById('modalBody');
+        if (modalBody && typeof renderAttachmentsHtml === 'function') {
+          modalBody.innerHTML = renderAttachmentsHtml(assetId);
+        }
+        renderTab();
+        window.toast.success('Ek silindi.');
+      } catch (err) {
+        window.toast.error('Ek silinemedi: ' + err.message);
+      }
+    });
   };
 
   // 5. Varlık Grupları (Asset Groups) Entegrasyonu
@@ -1011,9 +1256,16 @@
 
       await reloadMaintenance();
       await reloadAssets();
+      if (typeof recalcAssetLastMaintenance === 'function') {
+        recalcAssetLastMaintenance(assetId);
+      }
       closeModal();
+      if (!recordId && (window.currentTab === 'maint' || (typeof currentTab !== 'undefined' && currentTab === 'maint'))) {
+        window.maintFilter = 'history';
+        if (typeof maintFilter !== 'undefined') maintFilter = 'history';
+      }
       renderTab();
-      window.toast.success(recordId ? 'Bakım güncellendi.' : 'Bakım başarıyla tamamlandı ve kaydedildi.');
+      window.toast.success(recordId ? 'Bakım güncellendi.' : 'Bakım başarıyla tamamlandı ve Tamamlanan sekmesine aktarıldı.');
     } catch (err) {
       window.toast.error('Bakım kaydedilemedi: ' + err.message);
     }
@@ -1023,10 +1275,15 @@
   window.deleteMaintenance = function(id) {
     confirmDelete('Bu bakım kaydını silmek istediğinize emin misiniz? (Kullanılan malzemeler stoka iade edilir)', async () => {
       try {
+        const targetRec = (window.db?.maintenanceRecords || []).find(r => r.id === id);
+        const targetAssetId = targetRec ? targetRec.assetId : null;
         await API.deleteMaintenanceRecord(id);
         await reloadMaintenance();
         await reloadMaterials();
         await reloadAssets();
+        if (targetAssetId && typeof recalcAssetLastMaintenance === 'function') {
+          recalcAssetLastMaintenance(targetAssetId);
+        }
         try { closeModal(); } catch (e) {}
         renderTab();
         window.toast.success('Bakım kaydı silindi.');

@@ -241,7 +241,7 @@ window.db = {
 let db = window.db;
 let currentTab = 'panel';
 let weekOffset = 0;
-let maintFilter = 'upcoming';
+var maintFilter = 'upcoming';
 let faultFilter = 'open';
 let stockTab = 'materials';
 let tempChecklist = [], tempChecklistResults = [], tempUsedMaterials = [], tempOriginalUsed = [], tempSpareParts = [];
@@ -249,7 +249,7 @@ let tempMaintAttachments = [], maintAttachmentsToDelete = [];
 let _confirmCb = null;
 let assetQuery='', assetFGroup='', assetFStatus='';
 let faultQuery='', faultFPriority='', faultFAssignee='';
-let maintQuery='', maintFGroup='', maintHistQuery='', maintFType='';
+var maintQuery='', maintFGroup='', maintHistQuery='', maintFType='', maintFDue='due';
 let inspectionFilter='upcoming', inspectionQuery='', inspectionFGroup='', inspectionHistQuery='';
 let extMaintFilter='upcoming', extMaintFGroup='', extMaintHistQuery='';
 let calibrationFilter='upcoming', calibrationQuery='', calibrationFGroup='', calibrationHistQuery='';
@@ -1715,12 +1715,18 @@ function renderMaint(el){
   el.innerHTML = `<div class="topbar"><div><h1>Bakımlar</h1><div class="sub">Bekleyen ve tamamlanan bakımlar</div></div>
     ${canAdd?`<button class="accent" onclick="openMaintForm({assetId:null})">+ Bakım Kaydı Ekle</button>`:''}</div>
     <div class="tabs">
-      <button class="${maintFilter==='upcoming'?'active':''}" onclick="maintFilter='upcoming'; renderTab();">Planlanan</button>
-      <button class="${maintFilter==='history'?'active':''}" onclick="maintFilter='history'; renderTab();">Geçmiş Kayıtlar</button>
+      <button class="${maintFilter==='upcoming'?'active':''}" onclick="maintFilter='upcoming'; renderTab();">Açık Bakımlar</button>
+      <button class="${maintFilter==='history'?'active':''}" onclick="maintFilter='history'; renderTab();">Tamamlanan Bakımlar</button>
     </div>
     ${maintFilter==='upcoming'?`<div class="filterbar">
       <input type="text" id="maintSearch" value="${esc(maintQuery)}" placeholder="Ara: varlık, konum..." oninput="maintQuery=this.value; renderMaintBody();">
       <select onchange="maintFGroup=this.value; renderMaintBody();"><option value="">Tüm Gruplar</option>${db.assetGroups.map(g=>`<option value="${g.id}" ${maintFGroup===g.id?'selected':''}>${esc(g.name)}</option>`).join('')}</select>
+      <select onchange="maintFDue=this.value; renderMaintBody();">
+        <option value="due" ${maintFDue==='due'?'selected':''}>Açık / Vadesi Gelenler (Geciken &amp; Bugün)</option>
+        <option value="7" ${maintFDue==='7'?'selected':''}>Yaklaşanlar (7 Gün)</option>
+        <option value="30" ${maintFDue==='30'?'selected':''}>Bu Ay (30 Gün)</option>
+        <option value="all" ${maintFDue==='all'?'selected':''}>Tüm Planlananlar</option>
+      </select>
     </div>`:`<div class="filterbar">
       <input type="text" id="maintHistSearch" value="${esc(maintHistQuery)}" placeholder="Ara: takip no, varlık..." oninput="maintHistQuery=this.value; renderMaintBody();">
       <select onchange="maintFType=this.value; renderMaintBody();"><option value="">Tüm Tipler</option>${MAINT_TYPES.map(t=>`<option ${maintFType===t?'selected':''}>${t}</option>`).join('')}</select>
@@ -1734,7 +1740,15 @@ window.renderMaintBody = function(){
   const canAdd = can('doMaintenance');
   if(maintFilter==='upcoming'){
     const q = trNormalize(maintQuery);
-    const withDue = db.assets.map(a=>({a, due: nextDueDate(a)})).filter(x=>x.due)
+    let withDue = db.assets.map(a=>({a, due: nextDueDate(a)})).filter(x=>x.due);
+    if(maintFDue === 'due'){
+      withDue = withDue.filter(x => daysDiff(x.due) <= 0 && !(x.a.lastMaintenanceDate && x.a.lastMaintenanceDate >= todayStr() && daysDiff(x.due) > 0));
+    } else if(maintFDue === '7'){
+      withDue = withDue.filter(x => daysDiff(x.due) <= 7);
+    } else if(maintFDue === '30'){
+      withDue = withDue.filter(x => daysDiff(x.due) <= 30);
+    }
+    withDue = withDue
       .filter(x=>{
         if(q && !(trNormalize((x.a.name+' '+(x.a.assetCode||'')+' '+x.a.location)).includes(q))) return false;
         if(maintFGroup && x.a.groupId!==maintFGroup) return false;
@@ -1742,7 +1756,7 @@ window.renderMaintBody = function(){
       })
       .sort((p,q)=>p.due.localeCompare(q.due));
     body.innerHTML = `<div class="row" style="margin-bottom:10px;"><div class="spacer"></div><button class="ghost small" onclick="exportMaintUpcoming()">⬇ Dışa Aktar (CSV)</button></div>
-    <div class="panel">${withDue.length ? maintTableRows(withDue) : `<div class="empty">Eşleşen planlanan bakım yok.</div>`}</div>`;
+    <div class="panel">${withDue.length ? maintTableRows(withDue) : `<div class="empty">${maintFDue==='due'?'Açık / vadesi gelmiş bakım yok.':'Eşleşen planlanan bakım yok.'}</div>`}</div>`;
   } else {
     const q = trNormalize(maintHistQuery);
     const recs = [...db.maintenanceRecords].filter(r=>{
@@ -1777,7 +1791,11 @@ window.renderMaintBody = function(){
 };
 window.exportMaintUpcoming = function(){
   const headers=['Varlık Adı','Varlık Kodu','Grup','Konum','Planlanan Tarih','Kalan Gün','Durum'];
-  const withDue = db.assets.map(a=>({a, due: nextDueDate(a)})).filter(x=>x.due).sort((p,q)=>p.due.localeCompare(q.due));
+  let withDue = db.assets.map(a=>({a, due: nextDueDate(a)})).filter(x=>x.due);
+  if(maintFDue === 'due') withDue = withDue.filter(x => daysDiff(x.due) <= 0 && !(x.a.lastMaintenanceDate && x.a.lastMaintenanceDate >= todayStr() && daysDiff(x.due) > 0));
+  else if(maintFDue === '7') withDue = withDue.filter(x => daysDiff(x.due) <= 7);
+  else if(maintFDue === '30') withDue = withDue.filter(x => daysDiff(x.due) <= 30);
+  withDue.sort((p,q)=>p.due.localeCompare(q.due));
   const rows = withDue.map(x=>{
     const g = group(x.a.groupId);
     const dd = daysDiff(x.due);
@@ -1976,7 +1994,12 @@ window.saveMaintForm = async function(recordId){
     newRecId = rec.id;
   }
   recalcAssetLastMaintenance(assetId);
-  await saveDB(); closeModal(); renderTab();
+  await saveDB(); closeModal();
+  if(!recordId && (currentTab === 'maint' || window.currentTab === 'maint')){
+    maintFilter = 'history';
+    window.maintFilter = 'history';
+  }
+  renderTab();
   if(newRecId){
     const rec = db.maintenanceRecords.find(r=>r.id===newRecId);
     openModal(`<h3>Bakım Tamamlandı</h3><p style="font-size:13px; color:var(--ink-soft);">${esc(rec.trackingNo)} numaralı bakım kaydı oluşturuldu. Formu şimdi yazdırmak ister misiniz?</p>
@@ -2203,7 +2226,7 @@ window.addCertFile = function(inputEl, kind){
   if(file.size > 100*1024*1024){ alert('Dosya çok büyük (100 MB üzeri). Daha büyük dosyalar için "Bağlantı Ekle" seçeneğini kullanın.'); inputEl.value=''; return; }
   const reader = new FileReader();
   reader.onload = function(){
-    tempCertificates.push({id:uid('cert'), name:file.name, kind, dataUrl:reader.result, addedDate:todayStr()});
+    tempCertificates.push({id:uid('cert'), name:file.name, kind, dataUrl:reader.result, addedDate:todayStr(), file, isNew:true});
     renderCertRows();
     inputEl.value='';
   };
@@ -2213,14 +2236,14 @@ window.addCertLink = function(){
   const name = document.getElementById('cert-link-name').value.trim();
   const url = document.getElementById('cert-link-url').value.trim();
   if(!name || !url) return;
-  tempCertificates.push({id:uid('cert'), name, kind:'link', url, addedDate:todayStr()});
+  tempCertificates.push({id:uid('cert'), name, kind:'link', url, addedDate:todayStr(), isNew:true});
   document.getElementById('cert-link-name').value='';
   document.getElementById('cert-link-url').value='';
   renderCertRows();
 };
 window.removeCertRow = function(i){
   const c = tempCertificates[i];
-  if(c && c.storageKey) certsToDelete.push(c.storageKey);
+  if(c && (c.id || c.storageKey)) certsToDelete.push(c.id || c.storageKey);
   tempCertificates.splice(i,1);
   renderCertRows();
 };
@@ -2744,7 +2767,7 @@ window.addCalibCertLink = function(){
 };
 window.removeCalibCertRow = function(i){
   const c = tempCalibrationCertificates[i];
-  if(c && c.storageKey) calibCertsToDelete.push(c.storageKey);
+  if(c && (c.id || c.storageKey)) calibCertsToDelete.push(c.id || c.storageKey);
   tempCalibrationCertificates.splice(i,1);
   renderCalibCertRows();
 };

@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || './uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-// Yalnızca CMMS için zorunlu görsel ve belge uzantıları
+// CMMS için izin verilen görsel ve teknik belge uzantıları
 const ALLOWED_EXTENSIONS = new Set([
   '.jpg',
   '.jpeg',
@@ -14,6 +14,13 @@ const ALLOWED_EXTENSIONS = new Set([
   '.webp',
   '.ico',
   '.pdf',
+  '.doc',
+  '.docx',
+  '.xls',
+  '.xlsx',
+  '.txt',
+  '.csv',
+  '.zip',
 ]);
 
 const ALLOWED_MIME_TYPES = new Set([
@@ -26,6 +33,16 @@ const ALLOWED_MIME_TYPES = new Set([
   'image/ico',
   'image/x-ico',
   'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/plain',
+  'text/csv',
+  'application/csv',
+  'application/zip',
+  'application/x-zip-compressed',
+  'application/octet-stream',
 ]);
 
 const MIME_TO_EXT = {
@@ -38,6 +55,13 @@ const MIME_TO_EXT = {
   'image/ico': '.ico',
   'image/x-ico': '.ico',
   'application/pdf': '.pdf',
+  'application/msword': '.doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+  'application/vnd.ms-excel': '.xls',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+  'text/plain': '.txt',
+  'text/csv': '.csv',
+  'application/zip': '.zip',
 };
 
 // Path traversal korumalı güvenli dosya silme
@@ -97,6 +121,24 @@ function verifyMagicBytes(filePath, ext) {
       return buffer[0] === 0x00 && buffer[1] === 0x00 && buffer[2] === 0x01 && buffer[3] === 0x00;
     }
 
+    // DOCX, XLSX, ZIP: PK (0x50 0x4B 0x03 0x04)
+    if (lowerExt === '.docx' || lowerExt === '.xlsx' || lowerExt === '.zip') {
+      return buffer[0] === 0x50 && buffer[1] === 0x4B && (buffer[2] === 0x03 || buffer[2] === 0x05 || buffer[2] === 0x07);
+    }
+
+    // DOC, XLS: OLE Compound Document (0xD0 0xCF 0x11 0xE0)
+    if (lowerExt === '.doc' || lowerExt === '.xls') {
+      return buffer[0] === 0xD0 && buffer[1] === 0xCF && buffer[2] === 0x11 && buffer[3] === 0xE0;
+    }
+
+    // TXT, CSV: Düz metin (ilk baytlarda null byte içermemeli)
+    if (lowerExt === '.txt' || lowerExt === '.csv') {
+      for (let i = 0; i < Math.min(stat.size, 16); i++) {
+        if (buffer[i] === 0x00) return false;
+      }
+      return true;
+    }
+
     return false;
   } catch (err) {
     console.error('Magic byte doğrulama hatası:', err.message);
@@ -126,12 +168,12 @@ function fileFilter(req, file, cb) {
 
   if (!ALLOWED_EXTENSIONS.has(ext)) {
     console.warn(`[Dosya Yükleme Reddedildi] URL: ${req.method} ${req.originalUrl} | Dosya: "${file.originalname}" | Uzantı: "${ext || 'yok'}"`);
-    return cb(new Error('Desteklenmeyen dosya uzantısı. Yalnızca görsel (JPG, PNG, WEBP, ICO) ve PDF belgeleri yüklenebilir.'), false);
+    return cb(new Error('Desteklenmeyen dosya uzantısı. Yalnızca görsel (JPG, PNG, WEBP, ICO), teknik belge (PDF, DOC, DOCX, XLS, XLSX, TXT, CSV) ve arşiv (ZIP) dosyaları yüklenebilir.'), false);
   }
 
   if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
     console.warn(`[Dosya Yükleme Reddedildi] URL: ${req.method} ${req.originalUrl} | Dosya: "${file.originalname}" | Geçersiz MIME: "${file.mimetype}"`);
-    return cb(new Error('Desteklenmeyen dosya türü. Yalnızca geçerli resim (JPG, PNG, WEBP, ICO) ve PDF kabul edilir.'), false);
+    return cb(new Error('Desteklenmeyen dosya türü. Yalnızca geçerli görsel, PDF, Office ve metin belgeleri kabul edilir.'), false);
   }
 
   cb(null, true);

@@ -42,12 +42,25 @@ function toCamel(a) {
 router.get('/', async (req, res) => {
   const { limit, offset } = parsePagination(req.query, 10000, 10000);
   const { rows } = await pool.query(
-    `SELECT *, COUNT(*) OVER() AS full_count FROM assets ORDER BY name LIMIT $1 OFFSET $2`,
+    `SELECT a.*, COUNT(*) OVER() AS full_count,
+            COALESCE(att.items, '[]'::json) AS attachments
+     FROM assets a
+     LEFT JOIN (
+       SELECT asset_id, json_agg(json_build_object(
+         'id', id, 'name', name, 'kind', kind, 'storageKey', storage_key, 'url', url, 'addedDate', added_date
+       ) ORDER BY added_date DESC) AS items
+       FROM asset_attachments
+       GROUP BY asset_id
+     ) att ON att.asset_id = a.id
+     ORDER BY a.name LIMIT $1 OFFSET $2`,
     [limit, offset]
   );
   const totalCount = rows.length > 0 ? parseInt(rows[0].full_count, 10) : 0;
   setPaginationHeaders(res, totalCount, limit, offset);
-  res.json(rows.map(toCamel));
+  res.json(rows.map(a => ({
+    ...toCamel(a),
+    attachments: a.attachments || []
+  })));
 });
 
 // GET /api/assets/:id (ekler + yedek parçalarla birlikte)
@@ -135,24 +148,37 @@ router.delete('/:id', requireRole('Yönetici'), async (req, res) => {
 });
 
 // ---- Ekler ----
-router.post('/:id/attachments', requireRole('Yönetici'), upload.single('file'), async (req, res) => {
+router.post('/:id/attachments', requireRole('Yönetici', 'Teknisyen'), upload.single('file'), async (req, res) => {
   const { name, kind, url } = req.body;
+  const isLink = kind === 'link';
+  if (!isLink && !req.file) {
+    return res.status(400).json({ error: 'Yüklenecek bir dosya seçilmedi veya geçersiz dosya biçimi.' });
+  }
+  const attName = (name && name.trim()) || (req.file ? req.file.originalname : 'Belge');
+  const attKind = isLink ? 'link' : (kind || (req.file.mimetype.startsWith('image/') ? 'image' : 'dosya'));
   const storageKey = req.file ? req.file.filename : null;
+  const linkUrl = isLink ? (url ? url.trim() : null) : null;
   const { rows } = await pool.query(
     'INSERT INTO asset_attachments (asset_id, name, kind, storage_key, url) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-    [req.params.id, name || (req.file && req.file.originalname) || 'dosya', kind, storageKey, url || null]
+    [req.params.id, attName, attKind, storageKey, linkUrl]
   );
-  res.status(201).json(rows[0]);
+  res.status(201).json({
+    id: rows[0].id,
+    name: rows[0].name,
+    kind: rows[0].kind,
+    storageKey: rows[0].storage_key,
+    url: rows[0].url,
+    addedDate: rows[0].added_date,
+  });
 });
 
-router.delete('/:id/attachments/:attId', requireRole('Yönetici'), async (req, res) => {
-  if (!isUuid(req.params.attId)) return res.status(404).json({ error: 'Ek bulunamadı.' });
-  const { rows } = await pool.query('SELECT * FROM asset_attachments WHERE id=$1 AND asset_id=$2', [req.params.attId, req.params.id]);
+router.delete('/:id/attachments/:attId', requireRole('Yönetici', 'Teknisyen'), async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM asset_attachments WHERE (id::text=$1 OR storage_key=$1) AND asset_id=$2', [req.params.attId, req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'Ek bulunamadı.' });
   if (rows[0].storage_key) {
     safeUnlink(rows[0].storage_key);
   }
-  await pool.query('DELETE FROM asset_attachments WHERE id=$1', [req.params.attId]);
+  await pool.query('DELETE FROM asset_attachments WHERE id=$1', [rows[0].id]);
   res.status(204).end();
 });
 

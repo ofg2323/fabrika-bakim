@@ -300,14 +300,14 @@ router.post('/:id/certificates', upload.single('file'), async (req, res) => {
 
 // DELETE /api/inspections/:id/certificates/:certId — Sertifikayı sil
 router.delete('/:id/certificates/:certId', async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM inspection_certificates WHERE id = $1 AND record_id = $2', [req.params.certId, req.params.id]);
+  const { rows } = await pool.query('SELECT * FROM inspection_certificates WHERE (id::text = $1 OR storage_key = $1) AND record_id = $2', [req.params.certId, req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'Sertifika bulunamadı.' });
 
   if (rows[0].storage_key) {
     safeUnlink(rows[0].storage_key);
   }
 
-  await pool.query('DELETE FROM inspection_certificates WHERE id = $1', [req.params.certId]);
+  await pool.query('DELETE FROM inspection_certificates WHERE id = $1', [rows[0].id]);
   res.status(204).end();
 });
 

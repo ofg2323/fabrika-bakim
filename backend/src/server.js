@@ -78,12 +78,35 @@ app.use(cors(corsOptions));
 // Girdi boyutu kısıtı (DoS koruması)
 app.use(express.json({ limit: '2mb' }));
 
+const syncService = require('./modules/sync/sync.service');
+
+// Canlı Senkronizasyon Tetikleyici Middleware
+// Herhangi bir başarılı POST/PUT/PATCH/DELETE işleminde tüm bağlı istemcilere anında sinyal gönderir
+app.use((req, res, next) => {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    res.on('finish', () => {
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        const isAuthOnly = req.path.startsWith('/api/auth/login') || req.path.startsWith('/api/auth/refresh');
+        if (!isAuthOnly) {
+          syncService.notifyChange({
+            path: req.path,
+            method: req.method,
+            user: req.user?.name,
+          });
+        }
+      }
+    });
+  }
+  next();
+});
+
 // Hız sınırlama (Rate Limiting) — Geliştirme/test ortamında limitler esnek tutulur
 const isDev = process.env.NODE_ENV !== 'production';
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: isDev ? 10000 : 300,
+  skip: (req) => req.path.startsWith('/sync/'),
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false, default: true },
@@ -183,6 +206,7 @@ app.use('/api/calibrations', require('./modules/calibrations/calibrations.routes
 app.use('/api/projects', require('./modules/projects/projects.routes'));
 app.use('/api/settings', require('./modules/settings/settings.routes'));
 app.use('/api/audit-logs', require('./modules/audit-logs/audit-logs.routes'));
+app.use('/api/sync', require('./modules/sync/sync.routes'));
 
 app.get('/api/health', (req, res) => res.json({ ok: true, timestamp: new Date().toISOString() }));
 

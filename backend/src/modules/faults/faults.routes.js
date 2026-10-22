@@ -599,14 +599,14 @@ router.post('/:id/attachments', upload.single('file'), async (req, res) => {
 
 // DELETE /api/faults/:id/attachments/:attId — Arıza ekini sil
 router.delete('/:id/attachments/:attId', async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM fault_attachments WHERE id = $1 AND fault_id = $2', [req.params.attId, req.params.id]);
+  const { rows } = await pool.query('SELECT * FROM fault_attachments WHERE (id::text = $1 OR storage_key = $1) AND fault_id = $2', [req.params.attId, req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'Ek bulunamadı.' });
 
   if (rows[0].storage_key) {
     safeUnlink(rows[0].storage_key);
   }
 
-  await pool.query('DELETE FROM fault_attachments WHERE id = $1', [req.params.attId]);
+  await pool.query('DELETE FROM fault_attachments WHERE id = $1', [rows[0].id]);
   res.status(204).end();
 });
 

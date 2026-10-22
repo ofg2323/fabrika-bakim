@@ -324,7 +324,7 @@ router.post(['/:id/certificates', '/:id'], requireRole('Yönetici', 'Teknisyen')
 // DELETE /api/calibrations/:id/certificates/:certId — Sertifikayı sil
 router.delete('/:id/certificates/:certId', requireRole('Yönetici', 'Teknisyen'), async (req, res) => {
   const { rows } = await pool.query(
-    'SELECT storage_key FROM calibration_certificates WHERE id = $1 AND calibration_id = $2',
+    'SELECT id, storage_key FROM calibration_certificates WHERE (id::text = $1 OR storage_key = $1) AND calibration_id = $2',
     [req.params.certId, req.params.id]
   );
 
@@ -334,7 +334,7 @@ router.delete('/:id/certificates/:certId', requireRole('Yönetici', 'Teknisyen')
     safeUnlink(rows[0].storage_key);
   }
 
-  await pool.query('DELETE FROM calibration_certificates WHERE id = $1', [req.params.certId]);
+  await pool.query('DELETE FROM calibration_certificates WHERE id = $1', [rows[0].id]);
   res.status(204).end();
 });
 
