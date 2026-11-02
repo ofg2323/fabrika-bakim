@@ -28,7 +28,19 @@ router.get('/', async (req, res) => {
         ARRAY_AGG(DISTINCT cra.asset_id) FILTER (WHERE cra.asset_id IS NOT NULL), 
         '{}'
       ) AS asset_ids,
-      COUNT(DISTINCT cc.id)::int AS certificate_count
+      COUNT(DISTINCT cc.id)::int AS certificate_count,
+      COALESCE(
+        (SELECT json_agg(json_build_object(
+          'id', sub_cc.id,
+          'name', sub_cc.name,
+          'kind', sub_cc.kind,
+          'storageKey', sub_cc.storage_key,
+          'url', sub_cc.url,
+          'addedDate', sub_cc.added_date
+        ) ORDER BY sub_cc.added_date DESC)
+        FROM calibration_certificates sub_cc WHERE sub_cc.calibration_id = cr.id),
+        '[]'::json
+      ) AS certificates
     FROM calibration_records cr
     JOIN asset_groups ag ON ag.id = cr.group_id
     LEFT JOIN users u ON u.id = cr.completed_by

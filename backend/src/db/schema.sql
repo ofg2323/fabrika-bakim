@@ -47,7 +47,8 @@ CREATE TABLE asset_groups (
   ext_maint_baseline_date DATE,
   calibration_enabled BOOLEAN NOT NULL DEFAULT false,
   calibration_period_days INT,
-  calibration_baseline_date DATE
+  calibration_baseline_date DATE,
+  weekend_work BOOLEAN NOT NULL DEFAULT false
 );
 
 -- ================= VARLIKLAR =================
@@ -67,6 +68,7 @@ CREATE TABLE assets (
   last_maintenance_date DATE,
   last_inspection_date DATE,
   last_ext_maint_date DATE,
+  last_calibration_date DATE,
   created_date DATE NOT NULL DEFAULT CURRENT_DATE
 );
 CREATE INDEX idx_assets_group ON assets(group_id);

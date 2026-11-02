@@ -52,8 +52,46 @@ describe('Modül 3 & 4: Varlık Grupları ve Varlıklar Testleri', () => {
     const found = res.data.find(g => g.id === createdGroupId);
     assert.ok(found);
     assert.strictEqual(found.periodDays, 45);
+    assert.strictEqual(found.weekendWork, false);
     assert.strictEqual(found.inspectionBaselineDate, '2026-10-15');
     assert.strictEqual(found.extMaintBaselineDate, '2026-11-20');
+  });
+
+  test('Varlık grubu güncellenebilmeli ve kontrol listesine yeni maddeler eklenebilmeli (PUT /api/asset-groups/:id)', async () => {
+    assert.ok(createdGroupId);
+    const updatedName = `Enjeksiyon Presleri Güncel ${Date.now()}`;
+    const res = await api(`/api/asset-groups/${createdGroupId}`, {
+      method: 'PUT',
+      body: {
+        name: updatedName,
+        periodDays: 60,
+        weekendWork: true,
+        inspectionEnabled: true,
+        inspectionPeriodDays: 180,
+        inspectionBaselineDate: '2026-10-15',
+        extMaintEnabled: true,
+        extMaintPeriodDays: 365,
+        extMaintBaselineDate: '2026-11-20',
+        checklist: [
+          { id: 'q1', text: 'Hidrolik yağ seviyesini kontrol et' },
+          { id: 'q2', text: 'Basınç valflerini test et' },
+          { id: 'q3', text: 'Emniyet kapısı siviçlerini kontrol et' }
+        ],
+      },
+    }, adminToken);
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.data.name, updatedName);
+    assert.strictEqual(res.data.periodDays, 60);
+    assert.strictEqual(res.data.weekendWork, true);
+    assert.strictEqual(res.data.checklist.length, 3);
+    assert.strictEqual(res.data.checklist[2].text, 'Emniyet kapısı siviçlerini kontrol et');
+
+    const listRes = await api('/api/asset-groups', {}, adminToken);
+    const found = listRes.data.find(g => g.id === createdGroupId);
+    assert.ok(found);
+    assert.strictEqual(found.weekendWork, true);
+    assert.strictEqual(found.checklist.length, 3);
   });
 
   test('Varlık grubuna bağlı yeni bir varlık oluşturulabilmeli (POST /api/assets)', async () => {

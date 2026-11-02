@@ -19,6 +19,7 @@ function toCamel(g) {
     id: g.id,
     name: g.name,
     periodDays: g.period_days,
+    weekendWork: !!g.weekend_work,
     checklist: g.checklist,
     inspectionEnabled: g.inspection_enabled,
     inspectionPeriodDays: g.inspection_period_days,
@@ -37,7 +38,7 @@ router.get('/', async (req, res) => {
   res.json(rows.map(toCamel));
 });
 
-router.post('/', requireRole('Yönetici'), async (req, res) => {
+router.post('/', requireRole('Yönetici', 'Teknisyen'), async (req, res) => {
   const b = req.body;
   if (!b.name || !String(b.name).trim()) {
     return res.status(400).json({ error: 'Grup adı zorunludur.' });
@@ -46,17 +47,18 @@ router.post('/', requireRole('Yönetici'), async (req, res) => {
   const extDate = b.extMaintEnabled ? fmtDate(b.extMaintBaselineDate) : null;
   const calibDate = b.calibrationEnabled ? fmtDate(b.calibrationBaselineDate) : null;
   const periodDays = parseInt(b.periodDays, 10) || 30;
+  const weekendWork = !!b.weekendWork;
 
   const { rows } = await pool.query(
     `INSERT INTO asset_groups (
-       name, period_days, checklist, 
+       name, period_days, weekend_work, checklist, 
        inspection_enabled, inspection_period_days, inspection_baseline_date, 
        ext_maint_enabled, ext_maint_period_days, ext_maint_baseline_date,
        calibration_enabled, calibration_period_days, calibration_baseline_date
      )
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
     [
-      b.name.trim(), periodDays, JSON.stringify(b.checklist || []),
+      b.name.trim(), periodDays, weekendWork, JSON.stringify(b.checklist || []),
       !!b.inspectionEnabled, b.inspectionEnabled ? (parseInt(b.inspectionPeriodDays, 10) || null) : null, inspDate,
       !!b.extMaintEnabled, b.extMaintEnabled ? (parseInt(b.extMaintPeriodDays, 10) || null) : null, extDate,
       !!b.calibrationEnabled, b.calibrationEnabled ? (parseInt(b.calibrationPeriodDays, 10) || null) : null, calibDate
@@ -65,7 +67,7 @@ router.post('/', requireRole('Yönetici'), async (req, res) => {
   res.status(201).json(toCamel(rows[0]));
 });
 
-router.put('/:id', requireRole('Yönetici'), async (req, res) => {
+router.put('/:id', requireRole('Yönetici', 'Teknisyen'), async (req, res) => {
   const b = req.body;
   if (!b.name || !String(b.name).trim()) {
     return res.status(400).json({ error: 'Grup adı zorunludur.' });
@@ -74,16 +76,17 @@ router.put('/:id', requireRole('Yönetici'), async (req, res) => {
   const extDate = b.extMaintEnabled ? fmtDate(b.extMaintBaselineDate) : null;
   const calibDate = b.calibrationEnabled ? fmtDate(b.calibrationBaselineDate) : null;
   const periodDays = parseInt(b.periodDays, 10) || 30;
+  const weekendWork = !!b.weekendWork;
 
   const { rows } = await pool.query(
     `UPDATE asset_groups SET 
-       name=$1, period_days=$2, checklist=$3, 
-       inspection_enabled=$4, inspection_period_days=$5, inspection_baseline_date=$6, 
-       ext_maint_enabled=$7, ext_maint_period_days=$8, ext_maint_baseline_date=$9,
-       calibration_enabled=$10, calibration_period_days=$11, calibration_baseline_date=$12
-     WHERE id=$13 RETURNING *`,
+       name=$1, period_days=$2, weekend_work=$3, checklist=$4, 
+       inspection_enabled=$5, inspection_period_days=$6, inspection_baseline_date=$7, 
+       ext_maint_enabled=$8, ext_maint_period_days=$9, ext_maint_baseline_date=$10,
+       calibration_enabled=$11, calibration_period_days=$12, calibration_baseline_date=$13
+     WHERE id=$14 RETURNING *`,
     [
-      b.name.trim(), periodDays, JSON.stringify(b.checklist || []),
+      b.name.trim(), periodDays, weekendWork, JSON.stringify(b.checklist || []),
       !!b.inspectionEnabled, b.inspectionEnabled ? (parseInt(b.inspectionPeriodDays, 10) || null) : null, inspDate,
       !!b.extMaintEnabled, b.extMaintEnabled ? (parseInt(b.extMaintPeriodDays, 10) || null) : null, extDate,
       !!b.calibrationEnabled, b.calibrationEnabled ? (parseInt(b.calibrationPeriodDays, 10) || null) : null, calibDate,

@@ -1,5 +1,5 @@
 // Fabrika Bakım Service Worker (PWA & Çevrimdışı Desteği)
-const CACHE_NAME = 'cmms-cache-v2';
+const CACHE_NAME = 'cmms-cache-v9';
 
 const PRECACHE_ASSETS = [
   '/',
@@ -50,7 +50,7 @@ self.addEventListener('fetch', (event) => {
 
   // Statik varlıklar ve navigasyon için Network-First stratejisi (offline durumunda önbellekten sunulur)
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request, { cache: 'no-cache' })
       .then((networkResponse) => {
         if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
           const responseToCache = networkResponse.clone();

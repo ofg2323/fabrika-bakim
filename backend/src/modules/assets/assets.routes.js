@@ -34,6 +34,7 @@ function toCamel(a) {
     lastMaintenanceDate: fmtDate(a.last_maintenance_date),
     lastInspectionDate: fmtDate(a.last_inspection_date),
     lastExtMaintDate: fmtDate(a.last_ext_maint_date),
+    lastCalibrationDate: fmtDate(a.last_calibration_date),
     createdDate: fmtDate(a.created_date),
   };
 }

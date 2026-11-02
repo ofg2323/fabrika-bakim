@@ -91,6 +91,15 @@ function toCamelPurchase(p) {
 
 function toCamelMaintenance(r) {
   if (!r) return null;
+  let rawChecklist = Array.isArray(r.checklist_results) ? r.checklist_results : [];
+  if (rawChecklist.length === 0 && Array.isArray(r.group_checklist) && r.group_checklist.length > 0) {
+    rawChecklist = r.group_checklist;
+  }
+  const checklistResults = rawChecklist.map(q => ({
+    questionId: q.questionId || q.id,
+    text: q.text,
+    result: q.result || q.status || 'Uygun',
+  }));
   return {
     id: r.id,
     trackingNo: r.tracking_no,
@@ -105,7 +114,7 @@ function toCamelMaintenance(r) {
     endDate: r.end_date,
     completedBy: r.completed_by,
     completedByName: r.completed_by_name || null,
-    checklistResults: r.checklist_results || [],
+    checklistResults,
     notes: r.notes || '',
     extraCost: parseFloat(r.extra_cost) || 0,
     materialsCost: parseFloat(r.materials_cost) || 0,

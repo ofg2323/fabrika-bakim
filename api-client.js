@@ -259,6 +259,7 @@
     getMaintenanceRecords(params) { return this.request(this.buildUrl('/maintenance', params)); },
     getMaintenanceRecord(id) { return this.request(`/maintenance/${id}`); },
     createMaintenanceRecord(data) { return this.request('/maintenance', { method: 'POST', body: data }); },
+    updateMaintenanceRecord(id, data) { return this.request(`/maintenance/${id}`, { method: 'PUT', body: data }); },
     deleteMaintenanceRecord(id) { return this.request(`/maintenance/${id}`, { method: 'DELETE' }); },
     uploadMaintenanceAttachment(maintId, file, nameOrOpts, kind, url) {
       let name = nameOrOpts;
@@ -481,7 +482,7 @@
     getSyncEventsUrl() {
       const token = this.getToken();
       const query = token ? `?token=${encodeURIComponent(token)}` : '';
-      return `${this.BASE_URL}/sync/events${query}`;
+      return `${this.API_BASE}/sync/events${query}`;
     },
   };
 

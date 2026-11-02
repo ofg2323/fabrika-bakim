@@ -131,7 +131,8 @@ router.get('/', async (req, res) => {
       u_rep.name AS reported_by_name,
       u_ass.name AS assigned_to_name,
       COALESCE(mat_cost.total, 0) AS materials_cost,
-      COALESCE(mat_cost.items, '[]'::json) AS used_materials
+      COALESCE(mat_cost.items, '[]'::json) AS used_materials,
+      COALESCE(att_list.items, '[]'::json) AS attachments
     FROM faults f
     JOIN assets a ON a.id = f.asset_id
     LEFT JOIN users u_rep ON u_rep.id = f.reported_by
@@ -148,6 +149,19 @@ router.get('/', async (req, res) => {
       FROM fault_used_materials
       GROUP BY fault_id
     ) mat_cost ON mat_cost.fault_id = f.id
+    LEFT JOIN (
+      SELECT fault_id,
+        json_agg(json_build_object(
+          'id', id,
+          'name', name,
+          'kind', kind,
+          'storageKey', storage_key,
+          'url', url,
+          'addedDate', added_date
+        ) ORDER BY added_date DESC) AS items
+      FROM fault_attachments
+      GROUP BY fault_id
+    ) att_list ON att_list.fault_id = f.id
     WHERE 1=1
   `;
   const params = [];
@@ -260,12 +274,13 @@ router.get('/:id', async (req, res) => {
 
 // POST /api/faults — Yeni arıza kaydı bildir (geçmiş tarih ve durum desteğiyle)
 router.post('/', async (req, res) => {
-  const { assetId, title, description, priority, assignedTo, reportedDate, status, resolvedDate, externalServiceCost, notes, reportedBy } = req.body;
+  const { assetId, title, description, priority, assignedTo, assignedUserId, reportedDate, status, resolvedDate, externalServiceCost, notes, reportedBy } = req.body;
 
   if (!assetId || !title || !title.trim()) {
     return res.status(400).json({ error: 'Varlık seçimi ve arıza başlığı zorunludur.' });
   }
 
+  const finalAssigned = assignedTo !== undefined ? assignedTo : (assignedUserId || null);
   const parsedRepDate = parseDateStr(reportedDate);
   const parsedResDate = parseDateStr(resolvedDate);
   const faultStatus = normalizeFaultStatus(status, !!parsedResDate);
@@ -302,7 +317,7 @@ router.post('/', async (req, res) => {
         rDate,
         faultPriority,
         faultStatus,
-        assignedTo || null,
+        finalAssigned || null,
         resDate,
         notes ? notes.trim() : null,
         cost,
@@ -433,6 +448,7 @@ router.put('/:id', async (req, res) => {
     status,
     assignedTo,
     assignedUserId,
+    reportedDate,
     resolvedDate,
     notes,
     techSolution,
@@ -442,6 +458,7 @@ router.put('/:id', async (req, res) => {
 
   const finalAssigned = assignedTo !== undefined ? assignedTo : (assignedUserId !== undefined ? assignedUserId : undefined);
   const finalNotes = notes !== undefined ? notes : (techSolution !== undefined ? techSolution : undefined);
+  const parsedRepDate = parseDateStr(reportedDate);
 
   const client = await pool.connect();
   try {
@@ -527,8 +544,9 @@ router.put('/:id', async (req, res) => {
            assigned_to = $5,
            resolved_date = $6,
            notes = $7,
-           external_service_cost = $8
-       WHERE id = $9
+           external_service_cost = $8,
+           reported_date = COALESCE($9, reported_date)
+       WHERE id = $10
        RETURNING *`,
       [
         title ? title.trim() : null,
@@ -539,6 +557,7 @@ router.put('/:id', async (req, res) => {
         finalResolvedDate,
         finalNotes !== undefined ? finalNotes : oldFault.notes,
         externalServiceCost !== undefined ? parseFloat(externalServiceCost) || 0 : oldFault.external_service_cost,
+        parsedRepDate || null,
         oldFault.id,
       ]
     );

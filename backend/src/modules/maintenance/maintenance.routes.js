@@ -31,9 +31,11 @@ router.get('/', async (req, res) => {
       a.asset_code,
       a.group_id,
       ag.name AS group_name,
+      ag.checklist AS group_checklist,
       u.name AS completed_by_name,
       COALESCE(mat_cost.total, 0) AS materials_cost,
-      COALESCE(mat_cost.items, '[]'::json) AS used_materials
+      COALESCE(mat_cost.items, '[]'::json) AS used_materials,
+      COALESCE(att_list.items, '[]'::json) AS attachments
     FROM maintenance_records mr
     JOIN assets a ON a.id = mr.asset_id
     LEFT JOIN asset_groups ag ON ag.id = a.group_id
@@ -50,6 +52,19 @@ router.get('/', async (req, res) => {
       FROM maintenance_used_materials
       GROUP BY record_id
     ) mat_cost ON mat_cost.record_id = mr.id
+    LEFT JOIN (
+      SELECT maintenance_id,
+        json_agg(json_build_object(
+          'id', id,
+          'name', name,
+          'kind', kind,
+          'storageKey', storage_key,
+          'url', url,
+          'addedDate', added_date
+        ) ORDER BY added_date DESC) AS items
+      FROM maintenance_attachments
+      GROUP BY maintenance_id
+    ) att_list ON att_list.maintenance_id = mr.id
     WHERE 1=1
   `;
   const params = [];
@@ -105,6 +120,7 @@ router.get('/:id', async (req, res) => {
       a.asset_code,
       a.group_id,
       ag.name AS group_name,
+      ag.checklist AS group_checklist,
       u.name AS completed_by_name,
       COALESCE(mat_cost.total, 0) AS materials_cost
     FROM maintenance_records mr
@@ -169,6 +185,7 @@ router.post('/', requireRole('Yönetici', 'Teknisyen'), async (req, res) => {
     endDate,
     dueDate,
     checklistResults,
+    checklist,
     usedMaterials,
     notes,
     extraCost,
@@ -182,7 +199,9 @@ router.post('/', requireRole('Yönetici', 'Teknisyen'), async (req, res) => {
   const start = startDate || new Date().toISOString().split('T')[0];
   const end = endDate || start;
   const extra = parseFloat(extraCost) || 0;
-  const checklists = Array.isArray(checklistResults) ? checklistResults : [];
+  const rawChecklists = Array.isArray(checklistResults)
+    ? checklistResults
+    : (Array.isArray(checklist) ? checklist : []);
   const materialsList = Array.isArray(usedMaterials) ? usedMaterials.filter(m => parseFloat(m.qty) > 0) : [];
 
   const client = await pool.connect();
@@ -190,11 +209,49 @@ router.post('/', requireRole('Yönetici', 'Teknisyen'), async (req, res) => {
     await client.query('BEGIN');
 
     // Varlık kontrolü
-    const { rows: assetRows } = await client.query('SELECT id, name FROM assets WHERE id = $1 FOR UPDATE', [assetId]);
+    const { rows: assetRows } = await client.query(
+      'SELECT a.id, a.name, a.last_maintenance_date, a.created_date, ag.period_days, ag.weekend_work, ag.checklist AS group_checklist FROM assets a LEFT JOIN asset_groups ag ON ag.id = a.group_id WHERE a.id = $1 FOR UPDATE OF a',
+      [assetId]
+    );
     if (!assetRows[0]) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Varlık bulunamadı.' });
     }
+
+    let resolvedDueDate = dueDate || null;
+    if (!resolvedDueDate && assetRows[0].period_days) {
+      const baseRaw = assetRows[0].last_maintenance_date || assetRows[0].created_date || start;
+      const baseStr = (baseRaw instanceof Date ? baseRaw.toISOString() : String(baseRaw)).slice(0, 10);
+      const [by, bm, bd] = baseStr.split('-').map(Number);
+      if (by && bm && bd) {
+        const dt = new Date(by, bm - 1, bd, 12, 0, 0);
+        dt.setDate(dt.getDate() + Number(assetRows[0].period_days || 0));
+        if (!assetRows[0].weekend_work) {
+          const wd = dt.getDay();
+          if (wd === 6) dt.setDate(dt.getDate() + 2);
+          else if (wd === 0) dt.setDate(dt.getDate() + 1);
+        }
+        resolvedDueDate = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+      }
+    } else if (resolvedDueDate && !assetRows[0].weekend_work) {
+      const [by, bm, bd] = String(resolvedDueDate).slice(0, 10).split('-').map(Number);
+      if (by && bm && bd) {
+        const dt = new Date(by, bm - 1, bd, 12, 0, 0);
+        const wd = dt.getDay();
+        if (wd === 6) dt.setDate(dt.getDate() + 2);
+        else if (wd === 0) dt.setDate(dt.getDate() + 1);
+        resolvedDueDate = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+      }
+    }
+
+    const checklists = (rawChecklists.length > 0
+      ? rawChecklists
+      : (Array.isArray(assetRows[0].group_checklist) ? assetRows[0].group_checklist : [])
+    ).map(q => ({
+      questionId: q.questionId || q.id,
+      text: q.text,
+      result: q.result || q.status || 'Uygun',
+    }));
 
     // Takip numarası al
     const trackingNo = await getNextTrackingNo('maint', client);
@@ -209,7 +266,7 @@ router.post('/', requireRole('Yönetici', 'Teknisyen'), async (req, res) => {
       [
         trackingNo,
         assetId,
-        dueDate || null,
+        resolvedDueDate,
         maintType,
         start,
         end,
@@ -296,6 +353,189 @@ router.post('/', requireRole('Yönetici', 'Teknisyen'), async (req, res) => {
 
     await client.query('COMMIT');
     res.status(201).json(toCamelMaintenance(record));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/maintenance/:id — Bakım kaydını güncelle (kontrol listesi, kullanılan malzemeler, tarihler, notlar)
+router.put('/:id', requireRole('Yönetici', 'Teknisyen'), async (req, res) => {
+  const {
+    assetId,
+    type,
+    startDate,
+    endDate,
+    dueDate,
+    checklistResults,
+    checklist,
+    usedMaterials,
+    notes,
+    extraCost,
+  } = req.body;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: existingRows } = await client.query('SELECT * FROM maintenance_records WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!existingRows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Bakım kaydı bulunamadı.' });
+    }
+
+    const oldRec = existingRows[0];
+    const targetAssetId = assetId || oldRec.asset_id;
+    const maintType = type || oldRec.type || 'Periyodik';
+    const start = startDate || oldRec.start_date;
+    const end = endDate || oldRec.end_date || start;
+    const extra = extraCost !== undefined ? (parseFloat(extraCost) || 0) : (parseFloat(oldRec.extra_cost) || 0);
+    const notesVal = notes !== undefined ? (notes ? notes.trim() : null) : oldRec.notes;
+
+    const rawChecklists = Array.isArray(checklistResults)
+      ? checklistResults
+      : (Array.isArray(checklist) ? checklist : null);
+    const finalChecklists = rawChecklists !== null
+      ? rawChecklists.map(q => ({
+          questionId: q.questionId || q.id,
+          text: q.text,
+          result: q.result || q.status || 'Uygun',
+        }))
+      : (oldRec.checklist_results || []);
+
+    const { rows: assetRows } = await client.query('SELECT id, name FROM assets WHERE id = $1 FOR UPDATE', [targetAssetId]);
+    if (!assetRows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Varlık bulunamadı.' });
+    }
+
+    // Kullanılan malzeme listesi gönderildiyse stok farkını (delta) uygula
+    if (Array.isArray(usedMaterials)) {
+      const { rows: currentMats } = await client.query(
+        'SELECT material_id, qty FROM maintenance_used_materials WHERE record_id = $1',
+        [oldRec.id]
+      );
+
+      for (const cm of currentMats) {
+        await client.query('UPDATE materials SET qty = qty + $1 WHERE id = $2', [cm.qty, cm.material_id]);
+      }
+      await client.query('DELETE FROM maintenance_used_materials WHERE record_id = $1', [oldRec.id]);
+      await client.query('DELETE FROM stock_movements WHERE ref_maintenance_id = $1', [oldRec.id]);
+
+      for (const item of usedMaterials.filter(m => parseFloat(m.qty) > 0 && m.materialId)) {
+        const itemQty = parseFloat(item.qty);
+        const { rows: matRows } = await client.query(
+          'SELECT id, name, unit_cost, qty FROM materials WHERE id = $1 FOR UPDATE',
+          [item.materialId]
+        );
+
+        if (!matRows[0]) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: `Malzeme bulunamadı (ID: ${item.materialId}).` });
+        }
+
+        const currentQty = parseFloat(matRows[0].qty) || 0;
+        if (currentQty < itemQty) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({
+            error: `Yetersiz stok: "${matRows[0].name}" için mevcut stok (${currentQty}), kullanılan miktardan (${itemQty}) az.`
+          });
+        }
+
+        const unitCost = item.unitCost !== undefined ? parseFloat(item.unitCost) : (parseFloat(matRows[0].unit_cost) || 0);
+
+        await client.query(
+          `INSERT INTO maintenance_used_materials (record_id, material_id, qty, unit_cost)
+           VALUES ($1, $2, $3, $4)`,
+          [oldRec.id, item.materialId, itemQty, unitCost]
+        );
+
+        await client.query('UPDATE materials SET qty = qty - $1 WHERE id = $2', [itemQty, item.materialId]);
+
+        await client.query(
+          `INSERT INTO stock_movements (material_id, type, qty, date, user_id, reason, ref_maintenance_id)
+           VALUES ($1, 'Çıkış', $2, $3, $4, $5, $6)`,
+          [
+            item.materialId,
+            itemQty,
+            end,
+            req.user.id,
+            `Bakım kullanımı: ${oldRec.tracking_no} (${assetRows[0].name})`,
+            oldRec.id,
+          ]
+        );
+      }
+    }
+
+    const { rows: updatedRows } = await client.query(
+      `UPDATE maintenance_records
+       SET asset_id = $1,
+           due_date = COALESCE($2, due_date),
+           type = $3,
+           start_date = $4,
+           end_date = $5,
+           checklist_results = $6,
+           notes = $7,
+           extra_cost = $8
+       WHERE id = $9
+       RETURNING *`,
+      [
+        targetAssetId,
+        dueDate !== undefined ? dueDate : null,
+        maintType,
+        start,
+        end,
+        JSON.stringify(finalChecklists),
+        notesVal,
+        extra,
+        oldRec.id,
+      ]
+    );
+
+    await client.query(
+      `UPDATE assets 
+       SET last_maintenance_date = (
+         SELECT MAX(end_date) FROM maintenance_records WHERE asset_id = $1
+       )
+       WHERE id = $1`,
+      [targetAssetId]
+    );
+
+    await logAudit(client, {
+      userId: req.user.id,
+      userName: req.user.name,
+      action: 'UPDATE',
+      entityType: 'maintenance',
+      entityId: oldRec.id,
+      details: { trackingNo: oldRec.tracking_no, assetId: targetAssetId, type: maintType },
+      ipAddress: getClientIp(req),
+    });
+
+    const [attsRes, usedMatsRes] = await Promise.all([
+      client.query(
+        `SELECT id, name, kind, storage_key AS "storageKey", url, added_date AS "addedDate"
+         FROM maintenance_attachments
+         WHERE maintenance_id = $1
+         ORDER BY added_date DESC`,
+        [oldRec.id]
+      ),
+      client.query(
+        `SELECT id, material_id AS "materialId", qty::float8 AS qty, unit_cost::float8 AS "unitCost", (qty * unit_cost)::float8 AS "totalCost"
+         FROM maintenance_used_materials
+         WHERE record_id = $1`,
+        [oldRec.id]
+      ),
+    ]);
+
+    await client.query('COMMIT');
+    const formatted = toCamelMaintenance({
+      ...updatedRows[0],
+      attachments: attsRes.rows,
+      used_materials: usedMatsRes.rows,
+    });
+    res.json(formatted);
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

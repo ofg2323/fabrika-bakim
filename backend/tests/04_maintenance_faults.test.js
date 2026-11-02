@@ -1,9 +1,10 @@
-const { test, describe, before } = require('node:test');
+const { test, describe, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { api, getAdminToken } = require('./helpers');
 
 describe('Modül 9 & 10: Bakım ve Arıza Yönetimi Testleri', () => {
   let adminToken;
+  let groupId;
   let assetId;
   let materialId;
   let maintenanceId;
@@ -18,6 +19,7 @@ describe('Modül 9 & 10: Bakım ve Arıza Yönetimi Testleri', () => {
       method: 'POST',
       body: { name: `Bakım Test Grubu ${Date.now()}`, periodDays: 30 },
     }, adminToken);
+    groupId = groupRes.data.id;
 
     // 2. Test varlığı oluştur
     const assetRes = await api('/api/assets', {
@@ -64,7 +66,42 @@ describe('Modül 9 & 10: Bakım ve Arıza Yönetimi Testleri', () => {
     assert.strictEqual(res.status, 201);
     assert.ok(res.data.id);
     assert.ok(res.data.trackingNo.startsWith('B'), 'Bakım takip no B ile başlamalı');
+    assert.ok(Array.isArray(res.data.checklistResults) && res.data.checklistResults.length === 1);
+    assert.strictEqual(res.data.checklistResults[0].text, 'Yağlama yapıldı');
     maintenanceId = res.data.id;
+
+    // Belge/link ekle ve liste uç noktasında (GET /api/maintenance) göründüğünü doğrula
+    const attRes = await api(`/api/maintenance/${maintenanceId}/attachments`, {
+      method: 'POST',
+      body: { name: 'Bakım Servis Raporu', kind: 'link', url: 'https://ornek.com/bakim-raporu.pdf' },
+    }, adminToken);
+    assert.strictEqual(attRes.status, 201);
+
+    // Kaydı güncelle (PUT /api/maintenance/:id)
+    const putRes = await api(`/api/maintenance/${maintenanceId}`, {
+      method: 'PUT',
+      body: {
+        assetId,
+        type: 'Periyodik',
+        startDate: '2026-09-01',
+        endDate: '2026-09-01',
+        notes: 'Güncellenmiş bakım notu',
+        checklistResults: [{ questionId: 'q1', text: 'Yağlama yapıldı', result: 'Uygun' }],
+        usedMaterials: [{ materialId, qty: 5 }],
+      },
+    }, adminToken);
+    assert.strictEqual(putRes.status, 200);
+    assert.strictEqual(putRes.data.notes, 'Güncellenmiş bakım notu');
+    assert.strictEqual(putRes.data.checklistResults.length, 1);
+
+    // Liste sorgusunda (GET /api/maintenance) hem kontrol listesinin hem de eklenen belgenin geldiğini doğrula
+    const listRes = await api(`/api/maintenance?assetId=${assetId}`, {}, adminToken);
+    assert.strictEqual(listRes.status, 200);
+    const listedRec = listRes.data.find(r => r.id === maintenanceId);
+    assert.ok(listedRec, 'Tamamlanan bakım kaydı listede bulunmalı');
+    assert.strictEqual(listedRec.checklistResults.length, 1);
+    assert.strictEqual(listedRec.attachments.length, 1);
+    assert.strictEqual(listedRec.attachments[0].name, 'Bakım Servis Raporu');
 
     // 1. Malzeme stoku kontrol et (50 - 5 = 45 olmalı)
     const matRes = await api(`/api/materials/${materialId}`, {}, adminToken);
@@ -179,5 +216,11 @@ describe('Modül 9 & 10: Bakım ve Arıza Yönetimi Testleri', () => {
     // Stok bozulmadan 50 olarak kalmalı
     const matRes = await api(`/api/materials/${materialId}`, {}, adminToken);
     assert.strictEqual(matRes.data.qty, 50);
+  });
+
+  after(async () => {
+    if (assetId) await api(`/api/assets/${assetId}`, { method: 'DELETE' }, adminToken).catch(() => {});
+    if (groupId) await api(`/api/asset-groups/${groupId}`, { method: 'DELETE' }, adminToken).catch(() => {});
+    if (materialId) await api(`/api/materials/${materialId}`, { method: 'DELETE' }, adminToken).catch(() => {});
   });
 });

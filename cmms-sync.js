@@ -246,6 +246,8 @@
       }));
       targetDb.assetGroups = (assetGroups || []).filter(g => g && isUuid(g.id)).map(g => ({
         ...g,
+        weekendWork: !!g.weekendWork,
+        checklist: Array.isArray(g.checklist) ? g.checklist : [],
         inspectionBaselineDate: g.inspectionBaselineDate ? String(g.inspectionBaselineDate).slice(0, 10) : null,
         extMaintBaselineDate: g.extMaintBaselineDate ? String(g.extMaintBaselineDate).slice(0, 10) : null,
         calibrationBaselineDate: g.calibrationBaselineDate ? String(g.calibrationBaselineDate).slice(0, 10) : null,
@@ -264,6 +266,7 @@
       targetDb.projects = projects || [];
       targetDb.printTemplate = typeof migratePrintTemplate === 'function' ? migratePrintTemplate(settings) : (settings || {});
       targetDb.counters = targetDb.counters || { fault: 0, maint: 0, inspection: 0, extmaint: 0, calibration: 0, project: 0 };
+      if (typeof db !== 'undefined') db = window.db;
 
       // Sayaçları senkronize et
       syncCounters();
@@ -329,10 +332,13 @@
       if (window.db) {
         window.db.assetGroups = (groups || []).filter(g => g && isUuid(g.id)).map(g => ({
           ...g,
+          weekendWork: !!g.weekendWork,
+          checklist: Array.isArray(g.checklist) ? g.checklist : [],
           inspectionBaselineDate: g.inspectionBaselineDate ? String(g.inspectionBaselineDate).slice(0, 10) : null,
           extMaintBaselineDate: g.extMaintBaselineDate ? String(g.extMaintBaselineDate).slice(0, 10) : null,
           calibrationBaselineDate: g.calibrationBaselineDate ? String(g.calibrationBaselineDate).slice(0, 10) : null,
         }));
+        if (typeof db !== 'undefined') db = window.db;
       }
     } catch (e) { console.error('reloadAssetGroups error:', e); }
   };
@@ -344,10 +350,13 @@
         window.db.assets = (assets || []).filter(a => a && isUuid(a.id));
         window.db.assetGroups = (groups || []).filter(g => g && isUuid(g.id)).map(g => ({
           ...g,
+          weekendWork: !!g.weekendWork,
+          checklist: Array.isArray(g.checklist) ? g.checklist : [],
           inspectionBaselineDate: g.inspectionBaselineDate ? String(g.inspectionBaselineDate).slice(0, 10) : null,
           extMaintBaselineDate: g.extMaintBaselineDate ? String(g.extMaintBaselineDate).slice(0, 10) : null,
           calibrationBaselineDate: g.calibrationBaselineDate ? String(g.calibrationBaselineDate).slice(0, 10) : null,
         }));
+        if (typeof db !== 'undefined') db = window.db;
       }
     } catch (e) { console.error('reloadAssets error:', e); }
   };
@@ -404,6 +413,7 @@
         window.db.maintenanceRecords = maints || [];
         window.db.materials = (materials || []).filter(m => m && isUuid(m.id));
         window.db.stockMovements = movs || [];
+        if (typeof db !== 'undefined') db = window.db;
         syncCounters();
       }
     } catch (e) { console.error('reloadMaintenance error:', e); }
@@ -848,6 +858,7 @@
     if (!name) { window.toast.error('Grup adı zorunludur.'); return; }
 
     const periodDays = parseInt(document.getElementById('m-period')?.value, 10) || 30;
+    const weekendWork = document.getElementById('m-weekend-work')?.value === 'true';
     const inspEnabled = document.getElementById('m-inspect-enabled')?.checked || false;
     const inspDays = inspEnabled ? (parseInt(document.getElementById('m-inspect-period')?.value, 10) || 365) : null;
     const inspRaw = document.getElementById('m-inspect-baseline')?.value;
@@ -861,19 +872,29 @@
     const calibRaw = document.getElementById('m-calib-baseline')?.value;
     const calibBase = (calibEnabled && calibRaw) ? String(calibRaw).trim().slice(0, 10) : null;
 
-    // DOM'daki aktif input değerlerini senkronize et (onchange blur gecikmesini önlemek için)
+    // DOM'daki aktif input değerlerini doğrudan oku ve senkronize et
+    const activeChecklist = (typeof tempChecklist !== 'undefined' && Array.isArray(tempChecklist))
+      ? tempChecklist
+      : (window.tempChecklist || []);
     const domInputs = document.querySelectorAll('#checklistWrap .qtext');
-    if (domInputs.length && window.tempChecklist) {
-      domInputs.forEach((inp, idx) => {
-        if (window.tempChecklist[idx]) {
-          window.tempChecklist[idx].text = inp.value.trim();
-        }
-      });
+    let finalChecklist;
+    if (domInputs && domInputs.length) {
+      finalChecklist = Array.from(domInputs).map((inp, idx) => ({
+        id: (activeChecklist[idx] && activeChecklist[idx].id) || inp.getAttribute('data-qid') || uid('q'),
+        text: (inp.value || '').trim(),
+      })).filter(q => q.text.length > 0);
+    } else {
+      finalChecklist = activeChecklist
+        .filter(q => q && q.text && String(q.text).trim())
+        .map(q => ({ id: q.id || uid('q'), text: String(q.text).trim() }));
     }
+    if (typeof tempChecklist !== 'undefined') tempChecklist = finalChecklist;
+    window.tempChecklist = finalChecklist;
 
     const payload = {
       name,
       periodDays,
+      weekendWork,
       inspectionEnabled: inspEnabled,
       inspectionPeriodDays: inspDays,
       inspectionBaselineDate: inspBase,
@@ -883,16 +904,31 @@
       calibrationEnabled: calibEnabled,
       calibrationPeriodDays: calibDays,
       calibrationBaselineDate: calibBase,
-      checklist: (window.tempChecklist || []).filter(q => q && q.text && q.text.trim()).map(q => ({ id: q.id || uid('q'), text: q.text.trim() })),
+      checklist: finalChecklist,
     };
 
     try {
+      let saved;
       if (id) {
-        await API.updateAssetGroup(id, payload);
+        saved = await API.updateAssetGroup(id, payload);
       } else {
-        await API.createAssetGroup(payload);
+        saved = await API.createAssetGroup(payload);
+      }
+      if (saved && window.db && Array.isArray(window.db.assetGroups)) {
+        const idx = window.db.assetGroups.findIndex(g => g && g.id === saved.id);
+        const normalizedSaved = {
+          ...saved,
+          weekendWork: !!saved.weekendWork,
+          checklist: Array.isArray(saved.checklist) ? saved.checklist : finalChecklist,
+          inspectionBaselineDate: saved.inspectionBaselineDate ? String(saved.inspectionBaselineDate).slice(0, 10) : null,
+          extMaintBaselineDate: saved.extMaintBaselineDate ? String(saved.extMaintBaselineDate).slice(0, 10) : null,
+          calibrationBaselineDate: saved.calibrationBaselineDate ? String(saved.calibrationBaselineDate).slice(0, 10) : null,
+        };
+        if (idx >= 0) window.db.assetGroups[idx] = normalizedSaved;
+        else window.db.assetGroups.push(normalizedSaved);
       }
       await reloadAssetGroups();
+      if (typeof db !== 'undefined') db = window.db;
       closeModal();
       renderTab();
       window.toast.success(id ? 'Varlık grubu güncellendi.' : 'Yeni grup kaydedildi.');
@@ -1204,6 +1240,22 @@
   };
 
   // 10. Bakım Kayıtları (Maintenance) Entegrasyonu
+  function dataUrlToFile(dataUrl, filename) {
+    if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) return null;
+    try {
+      const parts = dataUrl.split(',');
+      const mimeMatch = parts[0].match(/:(.*?);/);
+      const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+      const bstr = atob(parts[1] || '');
+      let n = bstr.length;
+      const u8arr = new Uint8Array(n);
+      while (n--) u8arr[n] = bstr.charCodeAt(n);
+      return new File([u8arr], filename || 'belge', { type: mime });
+    } catch (e) {
+      return null;
+    }
+  }
+
   window.saveMaintForm = async function(recordId) {
     const assetId = document.getElementById('m-maintasset')?.value;
     if (!assetId) { window.toast.error('Varlık seçilmelidir.'); return; }
@@ -1214,58 +1266,119 @@
     const notes = (document.getElementById('m-maintnote')?.value || document.getElementById('m-maintnotes')?.value || '').trim();
     const extraCost = parseFloat(document.getElementById('m-maintextracost')?.value) || 0;
 
+    const currentChecklist = (typeof tempChecklistResults !== 'undefined' && Array.isArray(tempChecklistResults))
+      ? tempChecklistResults
+      : (window.tempChecklistResults || []);
+
+    const domSelects = document.querySelectorAll('#checklistResultsWrap .checklist-row select');
+    if (domSelects.length && currentChecklist.length) {
+      domSelects.forEach((sel, idx) => {
+        if (currentChecklist[idx]) {
+          currentChecklist[idx].result = sel.value;
+        }
+      });
+    }
+
+    const checklistResults = currentChecklist.map(q => ({
+      questionId: q.questionId || q.id,
+      text: q.text,
+      result: q.result || 'Uygun',
+    }));
+
+    const currentUsedMats = (typeof tempUsedMaterials !== 'undefined' && Array.isArray(tempUsedMaterials))
+      ? tempUsedMaterials
+      : (window.tempUsedMaterials || []);
+
+    const targetAsset = typeof asset === 'function' ? asset(assetId) : null;
+    const dueDate = (!recordId && targetAsset && typeof nextDueDate === 'function') ? nextDueDate(targetAsset) : undefined;
+
     const payload = {
       assetId,
+      dueDate,
       type,
       startDate,
       endDate,
       notes,
       extraCost,
-      checklist: window.tempChecklistResults || [],
-      usedMaterials: (window.tempUsedMaterials || []).filter(m => m.qty > 0),
+      checklistResults,
+      checklist: checklistResults,
+      usedMaterials: currentUsedMats.filter(m => parseFloat(m.qty) > 0 && m.materialId),
     };
+
+    const toDeleteAtts = (typeof maintAttachmentsToDelete !== 'undefined' && Array.isArray(maintAttachmentsToDelete))
+      ? [...maintAttachmentsToDelete]
+      : [...(window.maintAttachmentsToDelete || [])];
+
+    const currentAtts = (typeof tempMaintAttachments !== 'undefined' && Array.isArray(tempMaintAttachments))
+      ? [...tempMaintAttachments]
+      : [...(window.tempMaintAttachments || [])];
+
+    // Bağlantı alanına yazılıp "+ Bağlantı Ekle" butonuna basılmamış bir link varsa otomatik ekle
+    const pendingLinkUrl = (document.getElementById('maint-attach-link-url')?.value || '').trim();
+    const pendingLinkName = (document.getElementById('maint-attach-link-name')?.value || '').trim();
+    if (pendingLinkUrl) {
+      currentAtts.push({
+        id: uid('att'),
+        name: pendingLinkName || pendingLinkUrl,
+        kind: 'link',
+        url: pendingLinkUrl,
+        addedDate: todayStr(),
+        isNew: true,
+      });
+    }
 
     try {
       let recId = recordId;
       if (recordId) {
-        await API.updateMaintenanceRecord(recordId, payload);
+        if (typeof API.updateMaintenanceRecord === 'function') {
+          await API.updateMaintenanceRecord(recordId, payload);
+        } else {
+          await API.request(`/maintenance/${recordId}`, { method: 'PUT', body: payload });
+        }
       } else {
         const created = await API.createMaintenanceRecord(payload);
         recId = created.id;
       }
 
       // Silinecek ekler
-      if (window.maintAttachmentsToDelete && window.maintAttachmentsToDelete.length > 0) {
-        for (const attId of window.maintAttachmentsToDelete) {
+      if (toDeleteAtts.length > 0) {
+        for (const attId of toDeleteAtts) {
           try { await API.deleteMaintenanceAttachment(recId, attId); } catch (e) {}
         }
       }
 
       // Yeni ekler
-      if (window.tempMaintAttachments && window.tempMaintAttachments.length > 0) {
-        for (const a of window.tempMaintAttachments) {
-          if (a.isNew) {
+      if (currentAtts.length > 0) {
+        for (const a of currentAtts) {
+          const needsUpload = a && (a.isNew || (!a.storageKey && (a.file || a.dataUrl || (a.kind === 'link' && !isUuid(a.id)))));
+          if (needsUpload) {
             if (a.kind === 'link') {
-              await API.uploadMaintenanceAttachment(recId, null, { name: a.name, kind: 'link', url: a.url });
-            } else if (a.file) {
-              await API.uploadMaintenanceAttachment(recId, a.file, { name: a.name, kind: a.kind });
+              await API.uploadMaintenanceAttachment(recId, null, { name: a.name || a.url, kind: 'link', url: a.url });
+            } else {
+              const fileObj = a.file || dataUrlToFile(a.dataUrl, a.name);
+              if (fileObj) {
+                await API.uploadMaintenanceAttachment(recId, fileObj, { name: a.name, kind: a.kind });
+              }
             }
           }
         }
       }
 
+      const freshRec = await API.getMaintenanceRecord(recId).catch(() => null);
       await reloadMaintenance();
+      if (freshRec && window.db && Array.isArray(window.db.maintenanceRecords)) {
+        const idx = window.db.maintenanceRecords.findIndex(r => r && r.id === freshRec.id);
+        if (idx >= 0) window.db.maintenanceRecords[idx] = freshRec;
+        else window.db.maintenanceRecords.unshift(freshRec);
+      }
       await reloadAssets();
+      if (typeof db !== 'undefined') db = window.db;
       if (typeof recalcAssetLastMaintenance === 'function') {
         recalcAssetLastMaintenance(assetId);
       }
       closeModal();
-      if (!recordId && (window.currentTab === 'maint' || (typeof currentTab !== 'undefined' && currentTab === 'maint'))) {
-        window.maintFilter = 'history';
-        if (typeof maintFilter !== 'undefined') maintFilter = 'history';
-      }
       renderTab();
-      window.toast.success(recordId ? 'Bakım güncellendi.' : 'Bakım başarıyla tamamlandı ve Tamamlanan sekmesine aktarıldı.');
+      window.toast.success(recordId ? 'Bakım kaydı güncellendi.' : 'Bakım başarıyla tamamlandı.');
     } catch (err) {
       window.toast.error('Bakım kaydedilemedi: ' + err.message);
     }
@@ -1301,7 +1414,8 @@
 
     const description = (document.getElementById('m-fdesc')?.value || '').trim();
     const priority = document.getElementById('m-fprio')?.value || 'Orta';
-    const assignedUserId = document.getElementById('m-fassignee')?.value || null;
+    const assignedUserId = document.getElementById('m-fassignee')?.value || document.getElementById('m-fassign')?.value || null;
+    const reportedDate = document.getElementById('m-frepdate')?.value || todayStr();
 
     try {
       const created = await API.createFault({
@@ -1309,16 +1423,25 @@
         title,
         description,
         priority,
+        assignedTo: assignedUserId,
         assignedUserId,
+        reportedDate,
       });
 
+      const currentCerts = (typeof tempCertificates !== 'undefined' && Array.isArray(tempCertificates))
+        ? tempCertificates
+        : (window.tempCertificates || []);
+
       // Varsa ekleri yükle
-      if (window.tempCertificates && window.tempCertificates.length > 0) {
-        for (const c of window.tempCertificates) {
+      if (currentCerts.length > 0) {
+        for (const c of currentCerts) {
           if (c.kind === 'link') {
             await API.addFaultAttachment(created.id, { name: c.name, kind: 'link', url: c.url });
-          } else if (c.file) {
-            await API.uploadFaultAttachment(created.id, c.file, c.name);
+          } else {
+            const fileObj = c.file || dataUrlToFile(c.dataUrl, c.name);
+            if (fileObj) {
+              await API.uploadFaultAttachment(created.id, fileObj, c.name);
+            }
           }
         }
       }
@@ -1334,21 +1457,31 @@
   };
 
   window.saveFaultDetail = async function(id) {
+    const existingFault = (window.db?.faults || []).find(x => x.id === id);
+    const rawTitle = (document.getElementById('m-ftitle')?.value || '').trim();
+    const title = rawTitle || (existingFault ? existingFault.title : '');
     const newStatus = document.getElementById('m-fstatus')?.value || 'Açık';
     const description = (document.getElementById('m-fdesc')?.value || '').trim();
     const techSolution = (document.getElementById('m-ftechsolution')?.value || document.getElementById('m-fnote')?.value || '').trim();
     const priority = document.getElementById('m-fprio')?.value || 'Orta';
     const assignedUserId = document.getElementById('m-fassignee')?.value || document.getElementById('m-fassign')?.value || null;
+    const reportedDate = document.getElementById('m-frepdate')?.value || (existingFault ? existingFault.reportedDate : todayStr());
     const resolvedDate = newStatus === 'Tamamlandı' ? (document.getElementById('m-fresolveddate')?.value || document.getElementById('m-fresolved')?.value || todayStr()) : null;
     const externalServiceCost = parseFloat(document.getElementById('m-fextcost')?.value) || 0;
 
-    const usedMaterials = (tempUsedMaterials || []).filter(m => m.qty > 0 && m.materialId).map(u => ({
+    const currentUsedMats = (typeof tempUsedMaterials !== 'undefined' && Array.isArray(tempUsedMaterials))
+      ? tempUsedMaterials
+      : (window.tempUsedMaterials || []);
+
+    const usedMaterials = currentUsedMats.filter(m => parseFloat(m.qty) > 0 && m.materialId).map(u => ({
       materialId: u.materialId,
-      qty: u.qty,
+      qty: parseFloat(u.qty) || 0,
     }));
 
     try {
       await API.updateFault(id, {
+        title,
+        reportedDate,
         status: newStatus,
         description,
         techSolution,
@@ -1361,21 +1494,32 @@
         usedMaterials,
       });
 
+      const toDeleteCerts = (typeof certsToDelete !== 'undefined' && Array.isArray(certsToDelete))
+        ? certsToDelete
+        : (window.certsToDelete || []);
+
       // Sertifika/Ek silme
-      if (window.certsToDelete && window.certsToDelete.length > 0) {
-        for (const certId of window.certsToDelete) {
+      if (toDeleteCerts.length > 0) {
+        for (const certId of toDeleteCerts) {
           try { await API.deleteFaultAttachment(id, certId); } catch (e) {}
         }
       }
 
+      const currentCerts = (typeof tempCertificates !== 'undefined' && Array.isArray(tempCertificates))
+        ? tempCertificates
+        : (window.tempCertificates || []);
+
       // Yeni ekleri yükle
-      if (window.tempCertificates && window.tempCertificates.length > 0) {
-        for (const c of window.tempCertificates) {
+      if (currentCerts.length > 0) {
+        for (const c of currentCerts) {
           if (c.isNew) {
             if (c.kind === 'link') {
               await API.addFaultAttachment(id, { name: c.name, kind: 'link', url: c.url });
-            } else if (c.file) {
-              await API.uploadFaultAttachment(id, c.file, c.name);
+            } else {
+              const fileObj = c.file || dataUrlToFile(c.dataUrl, c.name);
+              if (fileObj) {
+                await API.uploadFaultAttachment(id, fileObj, c.name);
+              }
             }
           }
         }

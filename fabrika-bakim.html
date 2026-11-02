@@ -238,32 +238,33 @@ window.db = {
   counters: { fault: 0, maint: 0, inspection: 0, extmaint: 0, calibration: 0, project: 0 },
   printTemplate: {}
 };
-let db = window.db;
-let currentTab = 'panel';
-let weekOffset = 0;
+var db = window.db;
+var currentUser = null;
+var currentTab = 'panel';
+var weekOffset = 0;
 var maintFilter = 'upcoming';
-let faultFilter = 'open';
-let stockTab = 'materials';
-let tempChecklist = [], tempChecklistResults = [], tempUsedMaterials = [], tempOriginalUsed = [], tempSpareParts = [];
-let tempMaintAttachments = [], maintAttachmentsToDelete = [];
-let _confirmCb = null;
-let assetQuery='', assetFGroup='', assetFStatus='';
-let faultQuery='', faultFPriority='', faultFAssignee='';
+var faultFilter = 'open';
+var stockTab = 'materials';
+var tempChecklist = [], tempChecklistResults = [], tempUsedMaterials = [], tempOriginalUsed = [], tempSpareParts = [];
+var tempMaintAttachments = [], maintAttachmentsToDelete = [];
+var _confirmCb = null;
+var assetQuery='', assetFGroup='', assetFStatus='';
+var faultQuery='', faultFPriority='', faultFAssignee='';
 var maintQuery='', maintFGroup='', maintHistQuery='', maintFType='', maintFDue='due';
-let inspectionFilter='upcoming', inspectionQuery='', inspectionFGroup='', inspectionHistQuery='';
-let extMaintFilter='upcoming', extMaintFGroup='', extMaintHistQuery='';
-let calibrationFilter='upcoming', calibrationQuery='', calibrationFGroup='', calibrationHistQuery='';
-let tempExtMaintAssetIds = [], tempCalibrationAssetIds = [];
-let tempCertificates = [], certsToDelete = [];
-let tempCalibrationCertificates = [], calibCertsToDelete = [];
-let stockMatQuery='', stockMatFStatus='';
-let needsQuery='', needsFStatus='';
-let purchQuery='';
-let supplierQuery='';
-let costStartDate='', costEndDate='', costFType='';
+var inspectionFilter='upcoming', inspectionQuery='', inspectionFGroup='', inspectionHistQuery='';
+var extMaintFilter='upcoming', extMaintFGroup='', extMaintHistQuery='';
+var calibrationFilter='upcoming', calibrationQuery='', calibrationFGroup='', calibrationHistQuery='';
+var tempInspectionAssetIds = [], tempExtMaintAssetIds = [], tempCalibrationAssetIds = [];
+var tempCertificates = [], certsToDelete = [];
+var tempCalibrationCertificates = [], calibCertsToDelete = [];
+var stockMatQuery='', stockMatFStatus='';
+var needsQuery='', needsFStatus='';
+var purchQuery='';
+var supplierQuery='';
+var costStartDate='', costEndDate='', costFType='';
 var currentProjectId = null, projectDetailTab = 'genel', projectQuery='', projectFStatus='';
-let movQuery='', movFType='';
-let comboData = {}, comboOnChangeMap = {};
+var movQuery='', movFType='';
+var comboData = {}, comboOnChangeMap = {};
 
 function trNormalize(s){
   return (s || '')
@@ -544,6 +545,7 @@ async function loadDB(){
   // düşülse bile veya eski/eksik şekilli bir kayıt yüklense bile,
   // aşağıdaki alanların her zaman var olması garanti edilir.
   if(!db || typeof db!=='object') db = seedDB();
+  window.db = db;
   db.users = db.users || [];
   db.assetGroups = db.assetGroups || [];
   db.assets = db.assets || [];
@@ -573,6 +575,7 @@ async function loadDB(){
   db.counters.extmaint = db.counters.extmaint || 0;
   db.counters.project = db.counters.project || 0;
   db.assetGroups.forEach(g=>{
+    if(g.weekendWork===undefined) g.weekendWork=false;
     if(g.inspectionEnabled===undefined) g.inspectionEnabled=false;
     if(g.inspectionPeriodDays===undefined) g.inspectionPeriodDays=null;
     if(g.inspectionBaselineDate===undefined) g.inspectionBaselineDate=null;
@@ -611,52 +614,62 @@ async function saveSession(userId){
   try{ await window.storage.set(SESSION_KEY, JSON.stringify({userId}), false); } catch(e){}
 }
 
-function group(id){ return (db && db.assetGroups ? db.assetGroups : []).find(g=>g && g.id===id); }
-function asset(id){ return (db && db.assets ? db.assets : []).find(a=>a && a.id===id); }
-function user(id){ return (db && db.users ? db.users : []).find(u=>u && u.id===id); }
-function material(id){ return (db && db.materials ? db.materials : []).find(m=>m && m.id===id); }
-function supplier(id){ return (db && db.suppliers ? db.suppliers : []).find(s=>s && s.id===id); }
+function group(id){ const d = window.db || db; return (d && d.assetGroups ? d.assetGroups : []).find(g=>g && g.id===id); }
+function asset(id){ const d = window.db || db; return (d && d.assets ? d.assets : []).find(a=>a && a.id===id); }
+function user(id){ const d = window.db || db; return (d && d.users ? d.users : []).find(u=>u && u.id===id); }
+function material(id){ const d = window.db || db; return (d && d.materials ? d.materials : []).find(m=>m && m.id===id); }
+function supplier(id){ const d = window.db || db; return (d && d.suppliers ? d.suppliers : []).find(s=>s && s.id===id); }
 function userName(id){ const u=user(id); return u?u.name:'—'; }
 
+function toLocalDateStr(d){
+  if(!d || isNaN(d.getTime())) return null;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + day;
+}
+function adjustToBusinessDay(d, weekendWork){
+  if(!d || isNaN(d.getTime())) return d;
+  if(!weekendWork){
+    const day = d.getDay(); // 0: Pazar, 6: Cumartesi
+    if(day === 6) d.setDate(d.getDate() + 2); // Cumartesi -> Pazartesi
+    else if(day === 0) d.setDate(d.getDate() + 1); // Pazar -> Pazartesi
+  }
+  return d;
+}
+function calcNextPlannedDate(rawDate, periodDays, weekendWork){
+  const base = String(rawDate || todayStr()).slice(0, 10);
+  const parts = base.split('-').map(Number);
+  if(parts.length !== 3 || parts.some(isNaN)) return null;
+  const d = new Date(parts[0], parts[1] - 1, parts[2], 12, 0, 0);
+  if(isNaN(d.getTime())) return null;
+  d.setDate(d.getDate() + Number(periodDays || 0));
+  adjustToBusinessDay(d, !!weekendWork);
+  return toLocalDateStr(d);
+}
 function nextDueDate(as){
   const g = group(as.groupId);
   if(!g) return null;
   const raw = as.lastMaintenanceDate || as.createdDate || todayStr();
-  const base = String(raw).slice(0, 10);
-  const d = new Date(base+'T00:00:00');
-  if (isNaN(d.getTime())) return null;
-  d.setDate(d.getDate() + Number(g.periodDays || 0));
-  return isNaN(d.getTime()) ? null : d.toISOString().slice(0,10);
+  return calcNextPlannedDate(raw, g.periodDays, g.weekendWork);
 }
 function nextInspectionDue(as){
   const g = group(as.groupId);
   if(!g || !g.inspectionEnabled || !g.inspectionPeriodDays) return null;
   const raw = as.lastInspectionDate || g.inspectionBaselineDate || as.createdDate || todayStr();
-  const base = String(raw).slice(0, 10);
-  const d = new Date(base+'T00:00:00');
-  if (isNaN(d.getTime())) return null;
-  d.setDate(d.getDate() + Number(g.inspectionPeriodDays || 0));
-  return isNaN(d.getTime()) ? null : d.toISOString().slice(0,10);
+  return calcNextPlannedDate(raw, g.inspectionPeriodDays, g.weekendWork);
 }
 function nextExtMaintDue(as){
   const g = group(as.groupId);
   if(!g || !g.extMaintEnabled || !g.extMaintPeriodDays) return null;
   const raw = as.lastExtMaintDate || g.extMaintBaselineDate || as.createdDate || todayStr();
-  const base = String(raw).slice(0, 10);
-  const d = new Date(base+'T00:00:00');
-  if (isNaN(d.getTime())) return null;
-  d.setDate(d.getDate() + Number(g.extMaintPeriodDays || 0));
-  return isNaN(d.getTime()) ? null : d.toISOString().slice(0,10);
+  return calcNextPlannedDate(raw, g.extMaintPeriodDays, g.weekendWork);
 }
 function nextCalibrationDue(as){
   const g = group(as.groupId);
   if(!g || !g.calibrationEnabled || !g.calibrationPeriodDays) return null;
   const raw = as.lastCalibrationDate || g.calibrationBaselineDate || as.createdDate || todayStr();
-  const base = String(raw).slice(0, 10);
-  const d = new Date(base+'T00:00:00');
-  if (isNaN(d.getTime())) return null;
-  d.setDate(d.getDate() + Number(g.calibrationPeriodDays || 0));
-  return isNaN(d.getTime()) ? null : d.toISOString().slice(0,10);
+  return calcNextPlannedDate(raw, g.calibrationPeriodDays, g.weekendWork);
 }
 function daysDiff(dateStr){
   if(!dateStr) return 0;
@@ -989,10 +1002,17 @@ function getMaintBlockRenderers(){
       <tr><th>Bakım Tipi</th><td>${esc(c.r.type||'Periyodik')}</td><th>Yapan</th><td>${esc(userName(c.r.completedBy))}</td></tr>
       <tr><th>Başlangıç</th><td>${fmtStr(c.r.startDate)}</td><th>Bitiş</th><td>${fmtStr(c.r.endDate)}</td></tr>
     </table>` : '',
-    checklist: (c) => (c.mt.showChecklist && c.r.checklistResults && c.r.checklistResults.length) ? `<div class="print-section-title">Kontrol Listesi</div>
+    checklist: (c) => {
+      if (!c.mt.showChecklist) return '';
+      const list = (c.r.checklistResults && c.r.checklistResults.length)
+        ? c.r.checklistResults
+        : ((c.g && c.g.checklist && c.g.checklist.length) ? c.g.checklist.map(q => ({ text: q.text, result: 'Uygun' })) : []);
+      if (!list.length) return '';
+      return `<div class="print-section-title">Kontrol Listesi</div>
       <table class="print-table"><thead><tr><th style="width:auto;">Madde</th><th>Sonuç</th></tr></thead><tbody>
-      ${c.r.checklistResults.map(q=>`<tr><td>${esc(q.text)}</td><td>${esc(q.result)}</td></tr>`).join('')}
-      </tbody></table>` : '',
+      ${list.map(q=>`<tr><td>${esc(q.text)}</td><td>${esc(q.result || q.status || 'Uygun')}</td></tr>`).join('')}
+      </tbody></table>`;
+    },
     materials: (c) => (c.mt.showMaterials && c.r.usedMaterials && c.r.usedMaterials.length) ? `<div class="print-section-title">Kullanılan Malzemeler</div>
       <table class="print-table"><thead><tr><th style="width:auto;">Malzeme</th><th>Miktar</th><th>Tutar</th></tr></thead><tbody>
       ${c.r.usedMaterials.map(u=>{ const m=material(u.materialId); return `<tr><td>${esc(m?m.name:'')}</td><td>${u.qty} ${m?esc(m.unit):''}</td><td>${fmtMoney(u.qty*(u.unitCost||0))}</td></tr>`; }).join('')}
@@ -1219,7 +1239,7 @@ function renderTab(){
 function renderPanel(el){
   const ws = startOfWeek(weekOffset);
   const we = new Date(ws); we.setDate(we.getDate()+6);
-  const wsStr = ws.toISOString().slice(0,10), weStr = we.toISOString().slice(0,10);
+  const wsStr = toLocalDateStr(ws), weStr = toLocalDateStr(we);
   const withDue = db.assets.map(a=>({a, due: nextDueDate(a)})).filter(x=>x.due);
   const pending = withDue.filter(x=> daysDiff(x.due) <= 0).sort((p,q)=>p.due.localeCompare(q.due));
   const thisWeek = withDue.filter(x=> x.due>=wsStr && x.due<=weStr).sort((p,q)=>p.due.localeCompare(q.due));
@@ -1575,6 +1595,7 @@ function renderGroups(el){
       const count = db.assets.filter(a=>a.groupId===g.id).length;
       return `<div class="panel">
         <div class="row"><h2 style="margin:0;">${esc(g.name)}</h2><span class="badge b-accent">${g.periodDays} günde bir</span>
+        ${g.weekendWork ? `<span class="badge b-ok">Hafta Sonu Çalışma Var (7 Gün)</span>` : `<span class="badge b-muted">Hafta Sonu Çalışma Yok (İlk İş Günü)</span>`}
         ${g.inspectionEnabled?`<span class="badge b-warn">Muayene: ${g.inspectionPeriodDays} günde bir${g.inspectionBaselineDate ? ' (İlk: ' + fmtStr(g.inspectionBaselineDate) + ')' : ''}</span>`:''}
         ${g.extMaintEnabled?`<span class="badge b-warn">Dış Bakım: ${g.extMaintPeriodDays} günde bir${g.extMaintBaselineDate ? ' (İlk: ' + fmtStr(g.extMaintBaselineDate) + ')' : ''}</span>`:''}
         ${g.calibrationEnabled?`<span class="badge b-warn">Kalibrasyon: ${g.calibrationPeriodDays} günde bir${g.calibrationBaselineDate ? ' (İlk: ' + fmtStr(g.calibrationBaselineDate) + ')' : ''}</span>`:''}
@@ -1597,7 +1618,8 @@ window.deleteGroup = function(id){
 };
 window.openGroupForm = function(id){
   const g = id ? group(id) : null;
-  tempChecklist = g ? g.checklist.map(q=>({...q})) : [];
+  tempChecklist = (g && Array.isArray(g.checklist)) ? g.checklist.map(q=>({...q})) : [];
+  window.tempChecklist = tempChecklist;
   const inspDateVal = (g && g.inspectionBaselineDate) ? String(g.inspectionBaselineDate).slice(0, 10) : '';
   const extDateVal = (g && g.extMaintBaselineDate) ? String(g.extMaintBaselineDate).slice(0, 10) : '';
   const calibDateVal = (g && g.calibrationBaselineDate) ? String(g.calibrationBaselineDate).slice(0, 10) : '';
@@ -1606,6 +1628,14 @@ window.openGroupForm = function(id){
     <div class="grid2">
       <div class="field"><label class="f-label" for="m-gname">Grup Adı</label><input id="m-gname" type="text" value="${g?esc(g.name):''}"></div>
       <div class="field"><label class="f-label" for="m-period">Bakım Periyodu (gün)</label><input id="m-period" type="number" min="1" value="${g?g.periodDays:30}"></div>
+    </div>
+    <div class="field" style="margin-top:10px;">
+      <label class="f-label" for="m-weekend-work">Hafta Sonu Çalışma Durumu (Planlama Takvimi)</label>
+      <select id="m-weekend-work">
+        <option value="false" ${(!g || !g.weekendWork) ? 'selected' : ''}>Hafta Sonu Çalışma Yok — Hafta sonuna gelen planlamaları ilk iş gününe (Pazartesi) aktar</option>
+        <option value="true" ${(g && g.weekendWork) ? 'selected' : ''}>Hafta Sonu Çalışma Var — Cumartesi ve Pazar dahil 7 gün planla</option>
+      </select>
+      <div class="muted tiny" style="margin-top:4px;">Hafta sonu çalışma olmayan iş yerlerinde periyodik bakım, dış bakım, muayene ve kalibrasyon tarihleri Cumartesi veya Pazar gününe denk gelirse otomatik olarak takip eden ilk iş gününe (Pazartesi) planlanır.</div>
     </div>
     <div class="field" style="margin-top:12px;"><label class="f-label">Kontrol Listesi</label>
       <div id="checklistWrap"></div>
@@ -1657,21 +1687,32 @@ window.openGroupForm = function(id){
   `);
   renderChecklistRows();
 };
+function syncChecklistInputsFromDom(){
+  const inputs = document.querySelectorAll('#checklistWrap .qtext');
+  if(inputs && inputs.length){
+    inputs.forEach((inp, idx) => {
+      if(tempChecklist[idx]) tempChecklist[idx].text = inp.value;
+    });
+  }
+  window.tempChecklist = tempChecklist;
+}
 function renderChecklistRows(){
   const w = document.getElementById('checklistWrap');
+  if(!w) return;
   w.innerHTML = tempChecklist.map((q,i)=>`
-    <div class="checklist-row"><input class="qtext" type="text" value="${esc(q.text)}" oninput="tempChecklist[${i}].text=this.value">
-    <button class="icon" onclick="removeChecklistRow(${i})">×</button></div>
+    <div class="checklist-row"><input class="qtext" data-qid="${esc(q.id||'')}" type="text" value="${esc(q.text)}" oninput="tempChecklist[${i}].text=this.value; window.tempChecklist=tempChecklist;">
+    <button class="icon" type="button" onclick="removeChecklistRow(${i})">×</button></div>
   `).join('') || `<div class="muted tiny">Henüz madde yok.</div>`;
 }
-window.addChecklistRow = function(){ tempChecklist.push({id:uid('q'), text:''}); renderChecklistRows(); };
-window.removeChecklistRow = function(i){ tempChecklist.splice(i,1); renderChecklistRows(); };
+window.addChecklistRow = function(){ syncChecklistInputsFromDom(); tempChecklist.push({id:uid('q'), text:''}); window.tempChecklist = tempChecklist; renderChecklistRows(); };
+window.removeChecklistRow = function(i){ syncChecklistInputsFromDom(); tempChecklist.splice(i,1); window.tempChecklist = tempChecklist; renderChecklistRows(); };
 window.saveGroup = async function(id){
   const nameEl = document.getElementById('m-gname');
   if(!nameEl) return;
   const name = nameEl.value.trim();
   if(!name){ alert('Grup adı zorunludur.'); return; }
   const periodDays = parseInt(document.getElementById('m-period')?.value) || 30;
+  const weekendWork = document.getElementById('m-weekend-work')?.value === 'true';
 
   // DOM input senkronizasyonu - doğrudan input alanlarından anlık oku
   const inputs = document.querySelectorAll('#checklistWrap .qtext');
@@ -1699,7 +1740,7 @@ window.saveGroup = async function(id){
   const calibrationBaselineDate = calibrationEnabled && rawCalibBase ? String(rawCalibBase).slice(0, 10) : null;
 
   const data = {
-    name, periodDays, checklist, 
+    name, periodDays, weekendWork, checklist, 
     inspectionEnabled, inspectionPeriodDays, inspectionBaselineDate, 
     extMaintEnabled, extMaintPeriodDays, extMaintBaselineDate,
     calibrationEnabled, calibrationPeriodDays, calibrationBaselineDate
@@ -1778,7 +1819,7 @@ window.renderMaintBody = function(){
           <td class="mono">${fmtStr(r.endDate)}</td>
           <td class="muted">${esc(userName(r.completedBy))}</td>
           <td class="mono">${fmtMoney(maintRecordCost(r))}</td>
-          <td>${attCount ? `<span class="badge b-ok"><span class="dot"></span>${attCount} dosya</span>` : `<span class="badge b-muted">—</span>`}</td>
+          <td>${attCount ? `<span class="badge b-ok" style="cursor:pointer;" title="Belgeleri görüntülemek için tıklayın" onclick="openMaintForm({recordId:'${r.id}'})"><span class="dot"></span>${attCount} dosya</span>` : `<span class="badge b-muted">—</span>`}</td>
           <td>${notOk? `<span class="badge b-danger"><span class="dot"></span>${notOk} sorun bulundu</span>` : `<span class="badge b-ok"><span class="dot"></span>Sorunsuz</span>`}</td>
           <td style="white-space:nowrap;">
             <button class="ghost small" onclick="printMaintRecord('${r.id}')">🖨️ Yazdır</button>
@@ -1810,27 +1851,40 @@ window.exportMaintHistory = function(){
   exportCSV('bakim-gecmisi.csv', headers, rows);
 };
 window.openMaintForm = function(opts){
-  const editing = !!opts.recordId;
-  const rec = editing ? db.maintenanceRecords.find(r=>r.id===opts.recordId) : null;
-  const fixedAssetId = editing ? rec.assetId : opts.assetId;
+  const d = window.db || db;
+  const editing = !!(opts && opts.recordId);
+  const rec = editing ? (d.maintenanceRecords || []).find(r=>r.id===opts.recordId) : null;
+  if(editing && !rec){ alert('Bakım kaydı bulunamadı.'); return; }
+  const fixedAssetId = editing ? rec.assetId : (opts ? opts.assetId : null);
   const adhoc = !fixedAssetId;
   const a = fixedAssetId ? asset(fixedAssetId) : null;
   const g = a ? group(a.groupId) : null;
 
   if(editing){
-    tempChecklistResults = (rec.checklistResults||[]).map(q=>({questionId:q.questionId, text:q.text, result:q.result}));
+    const rawChecklist = (rec.checklistResults && rec.checklistResults.length)
+      ? rec.checklistResults
+      : ((g && g.checklist && g.checklist.length) ? g.checklist.map(q => ({questionId: q.id, text: q.text, result: 'Uygun'})) : []);
+    tempChecklistResults = rawChecklist.map(q=>({questionId:q.questionId||q.id, text:q.text, result:q.result||q.status||'Uygun'}));
     tempUsedMaterials = (rec.usedMaterials||[]).map(u=>({...u}));
     tempOriginalUsed = (rec.usedMaterials||[]).map(u=>({...u}));
     tempMaintAttachments = (rec.attachments||[]).map(att=>({...att}));
     maintAttachmentsToDelete = [];
   } else {
-    tempChecklistResults = (g?g.checklist:[]).map(q=>({questionId:q.id, text:q.text, result:'Uygun'}));
+    tempChecklistResults = (g && Array.isArray(g.checklist) ? g.checklist : []).map(q=>({questionId:q.id, text:q.text, result:'Uygun'}));
     const spareIds = a?(a.spareParts||[]):[];
     tempUsedMaterials = spareIds.length ? [{materialId:spareIds[0], qty:0}] : [];
     tempOriginalUsed = [];
     tempMaintAttachments = [];
     maintAttachmentsToDelete = [];
   }
+  window.tempChecklistResults = tempChecklistResults;
+  window.tempUsedMaterials = tempUsedMaterials;
+  window.tempOriginalUsed = tempOriginalUsed;
+  window.tempMaintAttachments = tempMaintAttachments;
+  window.maintAttachmentsToDelete = maintAttachmentsToDelete;
+
+  const startVal = editing && rec.startDate ? String(rec.startDate).slice(0, 10) : todayStr();
+  const endVal = editing && rec.endDate ? String(rec.endDate).slice(0, 10) : todayStr();
 
   openModal(`
     <h3>${editing?'Bakım Kaydını Düzenle':'Bakımı Tamamla'}${a?' — '+esc(a.name):''}${editing&&rec.trackingNo?' — '+esc(rec.trackingNo):''}</h3>
@@ -1841,8 +1895,8 @@ window.openMaintForm = function(opts){
       <div class="field"></div>
     </div>
     <div class="grid2" style="margin-top:10px;">
-      <div class="field"><label class="f-label" for="m-startdate">Başlangıç Tarihi</label><input id="m-startdate" type="date" value="${editing?rec.startDate:todayStr()}"></div>
-      <div class="field"><label class="f-label" for="m-enddate">Bitiş Tarihi</label><input id="m-enddate" type="date" value="${editing?rec.endDate:todayStr()}"></div>
+      <div class="field"><label class="f-label" for="m-startdate">Başlangıç Tarihi</label><input id="m-startdate" type="date" value="${startVal}"></div>
+      <div class="field"><label class="f-label" for="m-enddate">Bitiş Tarihi</label><input id="m-enddate" type="date" value="${endVal}"></div>
     </div>
     <div class="field" style="margin-top:12px;"><label class="f-label">Kontrol Listesi</label><div id="checklistResultsWrap"></div></div>
     <div class="field" style="margin-top:12px;"><label class="f-label">Kullanılan Malzemeler</label>
@@ -1853,8 +1907,8 @@ window.openMaintForm = function(opts){
     <div class="field" style="margin-top:12px;"><label class="f-label">Belge &amp; Fotoğraflar (PDF / Resim / Bağlantı)</label>
       <div id="maintAttachListWrap"></div>
       <div class="grid2" style="margin-top:6px;">
-        <input type="file" accept="image/*" onchange="addMaintAttachFile(this,'image')">
-        <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx" onchange="addMaintAttachFile(this,'dosya')">
+        <div class="field"><span class="muted tiny">Fotoğraf / Görsel Ekle</span><input type="file" accept="image/*" onchange="addMaintAttachFile(this,'image')"></div>
+        <div class="field"><span class="muted tiny">Belge Ekle (PDF, Word, Excel vb.)</span><input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip,image/*" onchange="addMaintAttachFile(this,'dosya')"></div>
       </div>
       <div class="row" style="margin-top:6px;">
         <input type="text" id="maint-attach-link-name" placeholder="Bağlantı adı (ör. Servis Raporu)" style="flex:1;">
@@ -1872,87 +1926,124 @@ window.openMaintForm = function(opts){
       <button class="ghost" onclick="closeModal()">Vazgeç</button><button class="primary" onclick="saveMaintForm('${editing?opts.recordId:''}')">${editing?'Kaydet':'Bakımı Tamamla'}</button>
     </div>
   `);
-  if(adhoc){ comboInit('m-maintasset', db.assets.map(x=>({value:x.id,label:x.name})), db.assets[0]&&db.assets[0].id, function(){ updateAdhocChecklist(); }); }
+  if(adhoc){ comboInit('m-maintasset', (d.assets||[]).map(x=>({value:x.id,label:x.name})), d.assets[0]&&d.assets[0].id, function(){ updateAdhocChecklist(); }); }
   renderChecklistResults(); renderMatRows(); renderMaintAttachRows();
+
+  if(editing && window.CMMS_API && typeof window.CMMS_API.getMaintenanceRecord === 'function'){
+    window.CMMS_API.getMaintenanceRecord(opts.recordId).then(fresh => {
+      if(!fresh) return;
+      Object.assign(rec, fresh);
+      const newUploads = tempMaintAttachments.filter(x => x && x.isNew);
+      const serverAtts = (fresh.attachments || []).filter(sa => !maintAttachmentsToDelete.includes(sa.id) && !maintAttachmentsToDelete.includes(sa.storageKey));
+      tempMaintAttachments = [...serverAtts.map(att => ({...att})), ...newUploads];
+      window.tempMaintAttachments = tempMaintAttachments;
+      renderMaintAttachRows();
+    }).catch(() => {});
+  }
 };
 window.updateAdhocChecklist = function(){
   const assetId = document.getElementById('m-maintasset').value;
   const a = asset(assetId); const g = a?group(a.groupId):null;
-  tempChecklistResults = (g?g.checklist:[]).map(q=>({questionId:q.id, text:q.text, result:'Uygun'}));
+  tempChecklistResults = (g && Array.isArray(g.checklist) ? g.checklist : []).map(q=>({questionId:q.id, text:q.text, result:'Uygun'}));
+  window.tempChecklistResults = tempChecklistResults;
   renderChecklistResults();
 };
 function renderChecklistResults(){
   const w = document.getElementById('checklistResultsWrap');
+  if(!w) return;
   w.innerHTML = tempChecklistResults.map((q,i)=>`
     <div class="checklist-row"><span class="qtext">${esc(q.text)}</span>
-      <select onchange="tempChecklistResults[${i}].result=this.value">${['Uygun','Uygun Değil','Kapsam Dışı'].map(o=>`<option ${q.result===o?'selected':''}>${o}</option>`).join('')}</select>
+      <select onchange="tempChecklistResults[${i}].result=this.value; window.tempChecklistResults=tempChecklistResults;">${['Uygun','Uygun Değil','Kapsam Dışı'].map(o=>`<option ${q.result===o?'selected':''}>${o}</option>`).join('')}</select>
     </div>`).join('') || `<div class="muted tiny">Bu grupta kontrol maddesi tanımlı değil.</div>`;
 }
 function renderMatRows(){
   const w = document.getElementById('matUsedWrap');
   if (!w) return;
-  const sortedMaterials = (db.materials || []).slice().sort((a,b) => (a.name || '').localeCompare(b.name || '', 'tr'));
+  const d = window.db || db;
+  const sortedMaterials = (d.materials || []).slice().sort((a,b) => (a.name || '').localeCompare(b.name || '', 'tr'));
   w.innerHTML = tempUsedMaterials.map((r,i)=>`
     <div class="mat-row">
       ${comboHtml('mm-'+i, 'Malzeme ara ve seç (toplam ' + sortedMaterials.length + ' malzeme)...')}
-      <input type="number" min="0" step="0.1" value="${r.qty}" onchange="tempUsedMaterials[${i}].qty=parseFloat(this.value)||0" title="Kullanılan Miktar">
+      <input type="number" min="0" step="0.1" value="${r.qty}" onchange="tempUsedMaterials[${i}].qty=parseFloat(this.value)||0; window.tempUsedMaterials=tempUsedMaterials;" title="Kullanılan Miktar">
       <button class="icon" onclick="removeMatRow(${i})" title="Malzemeyi kaldır">×</button>
     </div>`).join('') || `<div class="muted tiny">Malzeme kullanılmadıysa boş bırakabilirsiniz.</div>`;
   tempUsedMaterials.forEach((r,i)=>{
-    comboInit('mm-'+i, sortedMaterials.map(m=>({value:m.id, label:m.name, sub:`${m.qty} ${m.unit} mevcut`})), r.materialId, function(val){ tempUsedMaterials[i].materialId = val; });
+    comboInit('mm-'+i, sortedMaterials.map(m=>({value:m.id, label:m.name, sub:`${m.qty} ${m.unit} mevcut`})), r.materialId, function(val){ tempUsedMaterials[i].materialId = val; window.tempUsedMaterials = tempUsedMaterials; });
   });
 }
 window.addMatRow = function(){
-  if(!db.materials || !db.materials.length){ alert('Önce Stok sekmesinden malzeme ekleyin.'); return; }
+  const d = window.db || db;
+  if(!d.materials || !d.materials.length){ alert('Önce Stok sekmesinden malzeme ekleyin.'); return; }
   const newIdx = tempUsedMaterials.length;
-  tempUsedMaterials.push({materialId:'', qty:1}); 
+  tempUsedMaterials.push({materialId:'', qty:1});
+  window.tempUsedMaterials = tempUsedMaterials;
   renderMatRows();
   setTimeout(() => {
     const inp = document.getElementById('mm-' + newIdx + '-q');
     if (inp) inp.focus();
   }, 50);
 };
-window.removeMatRow = function(i){ tempUsedMaterials.splice(i,1); renderMatRows(); };
+window.removeMatRow = function(i){ tempUsedMaterials.splice(i,1); window.tempUsedMaterials = tempUsedMaterials; renderMatRows(); };
 
 function renderMaintAttachRows(){
   const w = document.getElementById('maintAttachListWrap');
   if(!w) return;
   w.innerHTML = tempMaintAttachments.length ? tempMaintAttachments.map((c,i)=>`
-    <div class="cert-row">
-      <span class="cert-badge">${c.kind==='image'?'🖼️ Resim':(c.kind==='link'?'🔗 Bağlantı':'📄 Belge')}</span>
-      <span class="cert-name" title="${esc(c.name)}">${esc(c.name)}</span>
+    <div class="att-item">
+      <span style="font-size:16px;">${c.kind==='image'?'🖼️':(c.kind==='link'?'🔗':'📄')}</span>
+      <span style="flex:1; font-size:13px; font-weight:600;" title="${esc(c.name)}">${esc(c.name)}</span>
       <span class="muted tiny">${fmtStr(c.addedDate)}</span>
-      <div class="spacer"></div>
       ${c.kind==='link'?`<button class="ghost small" onclick="window.open('${esc(window.safeUrl?window.safeUrl(c.url):c.url)}','_blank','noopener,noreferrer')">Aç</button>`
         : c.storageKey?`<button class="ghost small" onclick="viewCertificate('${c.storageKey}')">Görüntüle</button>`:`<span class="muted tiny">(kaydedilince yüklenecek)</span>`}
       <button class="icon" onclick="removeMaintAttachRow(${i})">×</button>
     </div>`).join('') : `<div class="muted tiny">Henüz belge eklenmedi.</div>`;
 }
 window.addMaintAttachFile = function(inputEl, kind){
-  const file = inputEl.files[0];
-  if(!file) return;
-  if(file.size > 100*1024*1024){ alert('Dosya çok büyük (100 MB üzeri). Daha büyük dosyalar için bağlantı seçeneğini kullanın.'); inputEl.value=''; return; }
+  const rawFile = inputEl && inputEl.files && inputEl.files[0];
+  if(!rawFile) return;
+  if(rawFile.size > 100*1024*1024){ alert('Dosya çok büyük (100 MB üzeri). Daha büyük dosyalar için bağlantı seçeneğini kullanın.'); inputEl.value=''; return; }
+  const fileClone = new File([rawFile], rawFile.name, {
+    type: rawFile.type || 'application/octet-stream',
+    lastModified: rawFile.lastModified || Date.now()
+  });
+  const actualKind = (rawFile.type && rawFile.type.startsWith('image/')) ? 'image' : (kind || 'dosya');
+  const item = {
+    id: uid('att'),
+    name: rawFile.name,
+    kind: actualKind,
+    dataUrl: null,
+    addedDate: todayStr(),
+    file: fileClone,
+    isNew: true
+  };
+  tempMaintAttachments.push(item);
+  window.tempMaintAttachments = tempMaintAttachments;
+  renderMaintAttachRows();
+  inputEl.value = '';
   const reader = new FileReader();
   reader.onload = function(){
-    tempMaintAttachments.push({id:uid('att'), name:file.name, kind, dataUrl:reader.result, addedDate:todayStr(), file, isNew:true});
-    renderMaintAttachRows();
-    inputEl.value='';
+    item.dataUrl = reader.result;
   };
-  reader.readAsDataURL(file);
+  try { reader.readAsDataURL(fileClone); } catch(e){}
 };
 window.addMaintAttachLink = function(){
-  const name = document.getElementById('maint-attach-link-name').value.trim();
-  const url = document.getElementById('maint-attach-link-url').value.trim();
-  if(!name || !url) return;
+  const nameEl = document.getElementById('maint-attach-link-name');
+  const urlEl = document.getElementById('maint-attach-link-url');
+  const url = (urlEl ? urlEl.value : '').trim();
+  const name = (nameEl ? nameEl.value : '').trim() || url;
+  if(!url) return;
   tempMaintAttachments.push({id:uid('att'), name, kind:'link', url, addedDate:todayStr(), isNew:true});
-  document.getElementById('maint-attach-link-name').value='';
-  document.getElementById('maint-attach-link-url').value='';
+  window.tempMaintAttachments = tempMaintAttachments;
+  if(nameEl) nameEl.value='';
+  if(urlEl) urlEl.value='';
   renderMaintAttachRows();
 };
 window.removeMaintAttachRow = function(i){
   const c = tempMaintAttachments[i];
   if(c && (c.storageKey || c.id)) maintAttachmentsToDelete.push(c.id || c.storageKey);
   tempMaintAttachments.splice(i,1);
+  window.tempMaintAttachments = tempMaintAttachments;
+  window.maintAttachmentsToDelete = maintAttachmentsToDelete;
   renderMaintAttachRows();
 };
 
@@ -1995,10 +2086,6 @@ window.saveMaintForm = async function(recordId){
   }
   recalcAssetLastMaintenance(assetId);
   await saveDB(); closeModal();
-  if(!recordId && (currentTab === 'maint' || window.currentTab === 'maint')){
-    maintFilter = 'history';
-    window.maintFilter = 'history';
-  }
   renderTab();
   if(newRecId){
     const rec = db.maintenanceRecords.find(r=>r.id===newRecId);
@@ -2115,7 +2202,7 @@ window.exportInspectionHistory = function(){
   });
   exportCSV('muayene-gecmisi.csv', headers, rows);
 };
-let tempInspectionAssetIds = [];
+var tempInspectionAssetIds = [];
 window.openInspectionForm = function(opts){
   const editing = !!opts.recordId;
   const rec = editing ? db.inspectionRecords.find(r=>r.id===opts.recordId) : null;
@@ -2886,13 +2973,16 @@ window.openFaultForm = function(){
   const techs = db.users.filter(u=>u.role==='Teknisyen');
   tempCertificates = [];
   certsToDelete = [];
+  window.tempCertificates = tempCertificates;
+  window.certsToDelete = certsToDelete;
   openModal(`
     <h3>Arıza Bildir</h3>
     <div class="field"><label class="f-label">Varlık</label>${comboHtml('m-fasset','Varlık ara...')}</div>
     <div class="field" style="margin-top:10px;"><label class="f-label" for="m-ftitle">Başlık</label><input id="m-ftitle" type="text"></div>
     <div class="field" style="margin-top:10px;"><label class="f-label" for="m-fdesc">Açıklama</label><textarea id="m-fdesc"></textarea></div>
-    <div class="grid2" style="margin-top:10px;">
+    <div class="grid3" style="margin-top:10px;">
       <div class="field"><label class="f-label" for="m-fprio">Öncelik</label><select id="m-fprio">${['Düşük','Orta','Yüksek'].map(p=>`<option ${p==='Orta'?'selected':''}>${p}</option>`).join('')}</select></div>
+      <div class="field"><label class="f-label" for="m-frepdate">Bildirim Tarihi</label><input id="m-frepdate" type="date" value="${todayStr()}"></div>
       <div class="field"><label class="f-label">Atanan Teknisyen</label>${comboHtml('m-fassign','Teknisyen ara...')}</div>
     </div>
     <div class="field" style="margin-top:12px;"><label class="f-label">Görseller (isteğe bağlı)</label>
@@ -2913,6 +3003,7 @@ window.saveFault = async function(){
   const title = document.getElementById('m-ftitle').value.trim();
   const assetId = document.getElementById('m-fasset').value;
   if(!title || !assetId) return;
+  const reportedDate = (document.getElementById('m-frepdate') && document.getElementById('m-frepdate').value) || todayStr();
   const faultId = uid('f');
   const savedAtts = [];
   for(const c of tempCertificates){
@@ -2924,7 +3015,7 @@ window.saveFault = async function(){
     }catch(e){ alert('"'+c.name+'" kaydedilemedi, atlandı.'); }
   }
   const f = {id:faultId, trackingNo:nextTrackingNo('fault'), assetId, title, description:document.getElementById('m-fdesc').value.trim(),
-    reportedBy:currentUser.id, reportedDate:todayStr(), priority:document.getElementById('m-fprio').value,
+    reportedBy:currentUser.id, reportedDate, priority:document.getElementById('m-fprio').value,
     status:'Açık', assignedTo:document.getElementById('m-fassign').value||null, resolvedDate:null, usedMaterials:[], notes:'', attachments:savedAtts};
   db.faults.push(f);
   const a = asset(assetId); if(a && a.status==='Aktif') a.status='Arızalı';
@@ -2941,6 +3032,10 @@ window.openFaultDetail = async function(id){
   tempOriginalUsed = (f.usedMaterials||[]).map(u=>({...u}));
   tempCertificates = (f.attachments||[]).map(c=>({...c}));
   certsToDelete = [];
+  window.tempUsedMaterials = tempUsedMaterials;
+  window.tempOriginalUsed = tempOriginalUsed;
+  window.tempCertificates = tempCertificates;
+  window.certsToDelete = certsToDelete;
   openModal(`
     <h3>Arıza — ${esc(a?a.name:'')}${f.trackingNo?' — '+esc(f.trackingNo):''}</h3>
     <div class="field"><label class="f-label" for="m-ftitle">Başlık</label><input id="m-ftitle" type="text" value="${esc(f.title)}"></div>
@@ -2950,7 +3045,10 @@ window.openFaultDetail = async function(id){
       <div class="field"><label class="f-label" for="m-fstatus">Durum</label><select id="m-fstatus">${['Açık','Devam Ediyor','Tamamlandı'].map(s=>`<option ${f.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
       <div class="field"><label class="f-label">Atanan Teknisyen</label>${comboHtml('m-fassign','Teknisyen ara...')}</div>
     </div>
-    <div class="field" style="margin-top:10px;"><label class="f-label" for="m-fresolved">Kapanış Tarihi</label><input id="m-fresolved" type="date" value="${f.resolvedDate||''}"></div>
+    <div class="grid2" style="margin-top:10px;">
+      <div class="field"><label class="f-label" for="m-frepdate">Bildirim Tarihi</label><input id="m-frepdate" type="date" value="${f.reportedDate||''}"></div>
+      <div class="field"><label class="f-label" for="m-fresolved">Kapanış Tarihi</label><input id="m-fresolved" type="date" value="${f.resolvedDate||''}"></div>
+    </div>
     <div class="field" style="margin-top:10px;"><label class="f-label">Kullanılan Malzemeler</label>
       <div id="matUsedWrap"></div>
       <button class="ghost small" onclick="addMatRow()" style="margin-top:4px;">+ Malzeme ekle</button>
@@ -2996,6 +3094,7 @@ window.saveFaultDetail = async function(id){
   }
   f.attachments = savedAtts;
   f.title = document.getElementById('m-ftitle').value.trim() || f.title;
+  if(document.getElementById('m-frepdate') && document.getElementById('m-frepdate').value) f.reportedDate = document.getElementById('m-frepdate').value;
   f.description = document.getElementById('m-fdesc').value.trim();
   f.priority = document.getElementById('m-fprio').value;
   f.assignedTo = document.getElementById('m-fassign').value || null;
@@ -4134,9 +4233,9 @@ window.exportCostReport = function(){
 
 // ================= BASKI AYARLARI =================
 // ================= BASKI AYARLARI & FORM TASARIMCISI =================
-let settingsTab = 'print';
-let designerFormTab = 'fault'; // 'fault' | 'maint' | 'general'
-let currentDesignerLogoUrl = '';
+var settingsTab = 'print';
+var designerFormTab = 'fault'; // 'fault' | 'maint' | 'general'
+var currentDesignerLogoUrl = '';
 
 const SAMPLE_FAULT_PREVIEW = {
   trackingNo: 'A00105',
@@ -4963,11 +5062,125 @@ window.importFaultsFile = function(inputEl){
   reader.readAsText(file, 'UTF-8');
 };
 
-// ---------- modal ----------
-function openModal(html){ document.getElementById('modalBody').innerHTML = html; document.getElementById('overlay').classList.add('open'); }
+// ---------- modal & klavye kısayolları ----------
+function openModal(html){
+  const body = document.getElementById('modalBody');
+  body.innerHTML = html;
+  document.getElementById('overlay').classList.add('open');
+  const primaryBtn = body.querySelector('.actions button.primary');
+  if(primaryBtn && !primaryBtn.getAttribute('title')){
+    primaryBtn.setAttribute('title', 'Onayla / Kaydet (Kısayol: F2 veya F5)');
+  }
+}
 window.closeModal = function(){ document.getElementById('overlay').classList.remove('open'); };
 document.getElementById('overlay').addEventListener('click', e=>{ if(e.target.id==='overlay') closeModal(); });
-window.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
+
+function triggerShortcutButton(btn){
+  if(!btn || btn.disabled) return false;
+  if(btn.dataset.shortcutBusy === '1') return true;
+  btn.dataset.shortcutBusy = '1';
+  setTimeout(()=>{ try{ delete btn.dataset.shortcutBusy; }catch(e){} }, 600);
+  btn.click();
+  return true;
+}
+
+window.addEventListener('keydown', e=>{
+  const activeEl = document.activeElement || e.target;
+
+  // ESC: Filtre / arama kutularında yazılan harflerin tamamını sil; değilse açık pencereyi kapat
+  if(e.key === 'Escape'){
+    if(activeEl && activeEl.tagName === 'INPUT'){
+      // 1) Aranabilir açılır kutu (.combo-input)
+      if(activeEl.classList && activeEl.classList.contains('combo-input')){
+        const baseId = (activeEl.id || '').replace(/-q$/, '');
+        const listEl = baseId ? document.getElementById(baseId + '-list') : null;
+        if(activeEl.value){
+          e.preventDefault();
+          e.stopPropagation();
+          activeEl.value = '';
+          const hiddenEl = baseId ? document.getElementById(baseId) : null;
+          if(hiddenEl && (comboData[baseId] || []).some(o => String(o.value) === '')){
+            hiddenEl.value = '';
+            const cb = comboOnChangeMap[baseId];
+            if(cb) cb('');
+          }
+          if(typeof comboFilter === 'function' && baseId) comboFilter(baseId, true);
+          return;
+        }
+        if(listEl && listEl.style.display === 'block'){
+          e.preventDefault();
+          e.stopPropagation();
+          if(typeof comboClose === 'function' && baseId) comboClose(baseId);
+          return;
+        }
+      }
+      // 2) Liste filtre / arama kutuları (.filterbar input veya *Search)
+      const isFilterInput = (activeEl.closest && activeEl.closest('.filterbar')) ||
+        /Search$/i.test(activeEl.id || '') ||
+        activeEl.type === 'search';
+      if(isFilterInput && activeEl.type !== 'date' && activeEl.type !== 'checkbox' && activeEl.type !== 'file'){
+        e.preventDefault();
+        e.stopPropagation();
+        const inputId = activeEl.id;
+        activeEl.value = '';
+        activeEl.dispatchEvent(new Event('input', { bubbles: true }));
+        activeEl.dispatchEvent(new Event('change', { bubbles: true }));
+        if(inputId){
+          const refocused = document.getElementById(inputId);
+          if(refocused) refocused.focus();
+        }
+        return;
+      }
+    }
+    closeModal();
+    return;
+  }
+
+  // F2 (Onay Kısayolu) ve F5 (Kayıt Kısayolu)
+  if(e.key === 'F2' || e.key === 'F5'){
+    e.preventDefault();
+    e.stopPropagation();
+    if(e.repeat) return;
+
+    // Odaktaki input/textarea/select üzerinde onchange varsa önce tetikle
+    if(activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')){
+      try{ activeEl.dispatchEvent(new Event('change', { bubbles: true })); }catch(err){}
+    }
+
+    const overlay = document.getElementById('overlay');
+    const isModalOpen = overlay && overlay.classList.contains('open');
+    if(isModalOpen){
+      const modalBody = document.getElementById('modalBody');
+      if(modalBody){
+        const primaryBtn = modalBody.querySelector('.actions button.primary:not([disabled])') ||
+          modalBody.querySelector('button.primary:not([disabled])') ||
+          modalBody.querySelector('.actions button.accent:not([disabled])');
+        if(triggerShortcutButton(primaryBtn)) return;
+
+        // Ekler penceresinde bağlantı alanları doluysa Ekle butonunu tetikle
+        const linkName = document.getElementById('att-link-name');
+        const linkUrl = document.getElementById('att-link-url');
+        if(linkName && linkUrl && linkName.value.trim() && linkUrl.value.trim()){
+          const addLinkBtn = modalBody.querySelector('button[onclick*="addLinkAttachment"]');
+          if(triggerShortcutButton(addLinkBtn)) return;
+        }
+
+        // Sadece tek kapat/onay butonu olan bilgi pencerelerinde F2 ile pencereyi onayla/kapat
+        if(e.key === 'F2'){
+          const fallbackBtn = modalBody.querySelector('.actions button:not([disabled])');
+          if(triggerShortcutButton(fallbackBtn)) return;
+        }
+      }
+      return;
+    }
+
+    // Açık modal yoksa aktif ekrandaki kaydet / onay butonunu tetikle (Ayarlar, Proje Detay, Giriş ekranı vb.)
+    const pagePrimaryBtn = document.querySelector('#mainContent .att-item button.primary:not([disabled])') ||
+      document.querySelector('#mainContent button.primary:not([disabled])') ||
+      document.querySelector('.login-card button.primary:not([disabled])');
+    triggerShortcutButton(pagePrimaryBtn);
+  }
+});
 
 let deferredPWAInstallPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => {
@@ -4992,8 +5205,8 @@ if('serviceWorker' in navigator){
 }
 // boot(); çağrısı cmms-sync.js tarafından yönetilir
 </script>
-<script src="api-client.js"></script>
-<script src="cmms-sync.js"></script>
-<script src="table-sort.js"></script>
+<script src="api-client.js?v=9"></script>
+<script src="cmms-sync.js?v=9"></script>
+<script src="table-sort.js?v=9"></script>
 </body>
 </html>

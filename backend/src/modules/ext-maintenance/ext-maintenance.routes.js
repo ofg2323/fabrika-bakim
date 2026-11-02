@@ -29,7 +29,19 @@ router.get('/', async (req, res) => {
         ARRAY_AGG(DISTINCT ema.asset_id) FILTER (WHERE ema.asset_id IS NOT NULL), 
         '{}'
       ) AS asset_ids,
-      COUNT(DISTINCT ec.id)::int AS certificate_count
+      COUNT(DISTINCT ec.id)::int AS certificate_count,
+      COALESCE(
+        (SELECT json_agg(json_build_object(
+          'id', sub_ec.id,
+          'name', sub_ec.name,
+          'kind', sub_ec.kind,
+          'storageKey', sub_ec.storage_key,
+          'url', sub_ec.url,
+          'addedDate', sub_ec.added_date
+        ) ORDER BY sub_ec.added_date DESC)
+        FROM ext_maint_certificates sub_ec WHERE sub_ec.record_id = em.id),
+        '[]'::json
+      ) AS certificates
     FROM ext_maint_records em
     JOIN asset_groups ag ON ag.id = em.group_id
     LEFT JOIN users u ON u.id = em.completed_by

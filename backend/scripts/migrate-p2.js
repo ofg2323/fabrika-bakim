@@ -20,7 +20,8 @@ async function migrateP2() {
       ALTER TABLE asset_groups
       ADD COLUMN IF NOT EXISTS calibration_enabled BOOLEAN NOT NULL DEFAULT false,
       ADD COLUMN IF NOT EXISTS calibration_period_days INT,
-      ADD COLUMN IF NOT EXISTS calibration_baseline_date DATE;
+      ADD COLUMN IF NOT EXISTS calibration_baseline_date DATE,
+      ADD COLUMN IF NOT EXISTS weekend_work BOOLEAN NOT NULL DEFAULT false;
     `);
 
     // 3. maintenance_attachments tablosu eklenmesi

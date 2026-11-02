@@ -153,12 +153,24 @@ app.get('/uploads/:filename', (req, res, next) => {
 const frontendDir = path.resolve(__dirname, '../../');
 app.get(['/', '/fabrika-bakim.html', '/index.html'], (req, res) => {
   const fPath = path.join(frontendDir, 'fabrika-bakim.html');
-  if (fs.existsSync(fPath)) return res.sendFile(fPath);
+  if (fs.existsSync(fPath)) {
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    return res.sendFile(fPath);
+  }
   res.json({ ok: true, message: 'Fabrika Bakım API çalışıyor.' });
 });
-app.get('/api-client.js', (req, res) => res.sendFile(path.join(frontendDir, 'api-client.js')));
-app.get('/cmms-sync.js', (req, res) => res.sendFile(path.join(frontendDir, 'cmms-sync.js')));
-app.get('/table-sort.js', (req, res) => res.sendFile(path.join(frontendDir, 'table-sort.js')));
+app.get('/api-client.js', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  res.sendFile(path.join(frontendDir, 'api-client.js'));
+});
+app.get('/cmms-sync.js', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  res.sendFile(path.join(frontendDir, 'cmms-sync.js'));
+});
+app.get('/table-sort.js', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  res.sendFile(path.join(frontendDir, 'table-sort.js'));
+});
 app.get('/manifest.json', (req, res) => {
   const mPath = path.join(frontendDir, 'manifest.json');
   if (fs.existsSync(mPath)) {
