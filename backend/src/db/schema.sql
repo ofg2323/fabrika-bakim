@@ -244,6 +244,7 @@ CREATE TABLE faults (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tracking_no TEXT UNIQUE,
   asset_id UUID NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+  project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
   title TEXT NOT NULL,
   description TEXT,
   reported_by UUID REFERENCES users(id),
@@ -256,6 +257,7 @@ CREATE TABLE faults (
   external_service_cost NUMERIC(14,2) NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_faults_asset ON faults(asset_id);
+CREATE INDEX idx_faults_proj ON faults(project_id);
 
 CREATE TABLE fault_used_materials (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

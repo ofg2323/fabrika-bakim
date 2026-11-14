@@ -1416,10 +1416,12 @@
     const priority = document.getElementById('m-fprio')?.value || 'Orta';
     const assignedUserId = document.getElementById('m-fassignee')?.value || document.getElementById('m-fassign')?.value || null;
     const reportedDate = document.getElementById('m-frepdate')?.value || todayStr();
+    const projectId = document.getElementById('m-fproject')?.value || null;
 
     try {
       const created = await API.createFault({
         assetId,
+        projectId,
         title,
         description,
         priority,
@@ -1468,6 +1470,8 @@
     const reportedDate = document.getElementById('m-frepdate')?.value || (existingFault ? existingFault.reportedDate : todayStr());
     const resolvedDate = newStatus === 'Tamamlandı' ? (document.getElementById('m-fresolveddate')?.value || document.getElementById('m-fresolved')?.value || todayStr()) : null;
     const externalServiceCost = parseFloat(document.getElementById('m-fextcost')?.value) || 0;
+    const projectEl = document.getElementById('m-fproject');
+    const projectPayload = projectEl ? { projectId: projectEl.value || null } : {};
 
     const currentUsedMats = (typeof tempUsedMaterials !== 'undefined' && Array.isArray(tempUsedMaterials))
       ? tempUsedMaterials
@@ -1492,6 +1496,7 @@
         resolvedDate,
         externalServiceCost,
         usedMaterials,
+        ...projectPayload,
       });
 
       const toDeleteCerts = (typeof certsToDelete !== 'undefined' && Array.isArray(certsToDelete))

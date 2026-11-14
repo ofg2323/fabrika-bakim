@@ -118,7 +118,7 @@ router.param('id', (req, res, next, id) => {
 
 // GET /api/faults — Arızalar listesi (filtreleme ve arama destekli)
 router.get('/', async (req, res) => {
-  const { filter, status, priority, assetId, assignedTo, q, all } = req.query;
+  const { filter, status, priority, assetId, assignedTo, projectId, q, all } = req.query;
   let { limit, offset } = parsePagination(req.query, 10000, 200);
 
   let query = `
@@ -128,6 +128,8 @@ router.get('/', async (req, res) => {
       a.name AS asset_name,
       a.asset_code,
       a.location,
+      pr.name AS project_name,
+      pr.tracking_no AS project_tracking_no,
       u_rep.name AS reported_by_name,
       u_ass.name AS assigned_to_name,
       COALESCE(mat_cost.total, 0) AS materials_cost,
@@ -135,6 +137,7 @@ router.get('/', async (req, res) => {
       COALESCE(att_list.items, '[]'::json) AS attachments
     FROM faults f
     JOIN assets a ON a.id = f.asset_id
+    LEFT JOIN projects pr ON pr.id = f.project_id
     LEFT JOIN users u_rep ON u_rep.id = f.reported_by
     LEFT JOIN users u_ass ON u_ass.id = f.assigned_to
     LEFT JOIN (
@@ -193,6 +196,11 @@ router.get('/', async (req, res) => {
     params.push(assignedTo);
   }
 
+  if (projectId) {
+    query += ` AND f.project_id = $${paramIdx++}`;
+    params.push(projectId);
+  }
+
   if (q && q.trim()) {
     query += ` AND (f.tracking_no ILIKE $${paramIdx} OR f.title ILIKE $${paramIdx} OR a.name ILIKE $${paramIdx} OR COALESCE(f.notes, '') ILIKE $${paramIdx})`;
     params.push(`%${q.trim()}%`);
@@ -217,11 +225,14 @@ router.get('/:id', async (req, res) => {
       a.name AS asset_name,
       a.asset_code,
       a.location,
+      pr.name AS project_name,
+      pr.tracking_no AS project_tracking_no,
       u_rep.name AS reported_by_name,
       u_ass.name AS assigned_to_name,
       COALESCE(mat_cost.total, 0) AS materials_cost
     FROM faults f
     JOIN assets a ON a.id = f.asset_id
+    LEFT JOIN projects pr ON pr.id = f.project_id
     LEFT JOIN users u_rep ON u_rep.id = f.reported_by
     LEFT JOIN users u_ass ON u_ass.id = f.assigned_to
     LEFT JOIN (
@@ -274,11 +285,17 @@ router.get('/:id', async (req, res) => {
 
 // POST /api/faults — Yeni arıza kaydı bildir (geçmiş tarih ve durum desteğiyle)
 router.post('/', async (req, res) => {
-  const { assetId, title, description, priority, assignedTo, assignedUserId, reportedDate, status, resolvedDate, externalServiceCost, notes, reportedBy } = req.body;
+  const { assetId, projectId, title, description, priority, assignedTo, assignedUserId, reportedDate, status, resolvedDate, externalServiceCost, notes, reportedBy } = req.body;
 
   if (!assetId || !title || !title.trim()) {
     return res.status(400).json({ error: 'Varlık seçimi ve arıza başlığı zorunludur.' });
   }
+
+  if (projectId !== undefined && projectId !== null && projectId !== '' && !isUuid(projectId)) {
+    return res.status(400).json({ error: 'Geçersiz proje seçimi.' });
+  }
+
+  const finalProjectId = projectId ? projectId : null;
 
   const finalAssigned = assignedTo !== undefined ? assignedTo : (assignedUserId || null);
   const parsedRepDate = parseDateStr(reportedDate);
@@ -300,17 +317,26 @@ router.post('/', async (req, res) => {
       return res.status(404).json({ error: 'Varlık bulunamadı.' });
     }
 
+    if (finalProjectId) {
+      const { rows: projectRows } = await client.query('SELECT id FROM projects WHERE id = $1', [finalProjectId]);
+      if (!projectRows[0]) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Seçilen proje bulunamadı.' });
+      }
+    }
+
     const trackingNo = await getNextTrackingNo('fault', client);
 
     const { rows: faultRows } = await client.query(
       `INSERT INTO faults (
-        tracking_no, asset_id, title, description, reported_by, 
+        tracking_no, asset_id, project_id, title, description, reported_by, 
         reported_date, priority, status, assigned_to, resolved_date, notes, external_service_cost
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       RETURNING *`,
       [
         trackingNo,
         assetId,
+        finalProjectId,
         title.trim(),
         description ? description.trim() : null,
         reportedBy || req.user.id,
@@ -335,7 +361,7 @@ router.post('/', async (req, res) => {
       action: 'CREATE',
       entityType: 'fault',
       entityId: faultRows[0].id,
-      details: { trackingNo, assetId, title: title.trim(), priority: faultPriority, status: faultStatus },
+      details: { trackingNo, assetId, projectId: finalProjectId, title: title.trim(), priority: faultPriority, status: faultStatus },
       ipAddress: getClientIp(req),
     });
 
@@ -448,6 +474,7 @@ router.put('/:id', async (req, res) => {
     status,
     assignedTo,
     assignedUserId,
+    projectId,
     reportedDate,
     resolvedDate,
     notes,
@@ -460,6 +487,10 @@ router.put('/:id', async (req, res) => {
   const finalNotes = notes !== undefined ? notes : (techSolution !== undefined ? techSolution : undefined);
   const parsedRepDate = parseDateStr(reportedDate);
 
+  if (projectId !== undefined && projectId !== null && projectId !== '' && !isUuid(projectId)) {
+    return res.status(400).json({ error: 'Geçersiz proje seçimi.' });
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -471,6 +502,15 @@ router.put('/:id', async (req, res) => {
     }
 
     const oldFault = existingRows[0];
+
+    if (projectId) {
+      const { rows: projectRows } = await client.query('SELECT id FROM projects WHERE id = $1', [projectId]);
+      if (!projectRows[0]) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Seçilen proje bulunamadı.' });
+      }
+    }
+
     const newStatus = status || oldFault.status;
     let finalResolvedDate = oldFault.resolved_date;
 
@@ -545,8 +585,9 @@ router.put('/:id', async (req, res) => {
            resolved_date = $6,
            notes = $7,
            external_service_cost = $8,
-           reported_date = COALESCE($9, reported_date)
-       WHERE id = $10
+           reported_date = COALESCE($9, reported_date),
+           project_id = $10
+       WHERE id = $11
        RETURNING *`,
       [
         title ? title.trim() : null,
@@ -558,6 +599,7 @@ router.put('/:id', async (req, res) => {
         finalNotes !== undefined ? finalNotes : oldFault.notes,
         externalServiceCost !== undefined ? parseFloat(externalServiceCost) || 0 : oldFault.external_service_cost,
         parsedRepDate || null,
+        projectId !== undefined ? (projectId || null) : oldFault.project_id,
         oldFault.id,
       ]
     );
@@ -641,10 +683,19 @@ router.delete('/:id', requireRole('Yönetici'), async (req, res) => {
     for (const u of usedMats) {
       await client.query('UPDATE materials SET qty = qty + $1 WHERE id = $2', [u.qty, u.material_id]);
     }
-    const { rows } = await client.query('DELETE FROM faults WHERE id = $1 RETURNING id, tracking_no', [req.params.id]);
+    const { rows } = await client.query('DELETE FROM faults WHERE id = $1 RETURNING id, tracking_no, asset_id', [req.params.id]);
     if (!rows[0]) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Arıza kaydı bulunamadı.' });
+    }
+
+    // Silinen arızadan sonra varlığın açık arızası kalmadıysa durumunu 'Aktif'e çek
+    const { rows: openFaults } = await client.query(
+      "SELECT COUNT(*)::int AS count FROM faults WHERE asset_id = $1 AND status <> 'Tamamlandı'",
+      [rows[0].asset_id]
+    );
+    if (openFaults[0].count === 0) {
+      await client.query("UPDATE assets SET status = 'Aktif' WHERE id = $1 AND status = 'Arızalı'", [rows[0].asset_id]);
     }
 
     await logAudit(client, {
