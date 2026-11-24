@@ -5144,7 +5144,7 @@ function openModal(html, wide){
   document.getElementById('overlay').classList.add('open');
   const primaryBtn = body.querySelector('.actions button.primary');
   if(primaryBtn && !primaryBtn.getAttribute('title')){
-    primaryBtn.setAttribute('title', 'Onayla / Kaydet (Kısayol: F2 veya F5)');
+    primaryBtn.setAttribute('title', 'Onayla / Kaydet (Kısayol: F2)');
   }
 }
 window.closeModal = function(){ document.getElementById('overlay').classList.remove('open'); };
@@ -5211,8 +5211,8 @@ window.addEventListener('keydown', e=>{
     return;
   }
 
-  // F2 (Onay Kısayolu) ve F5 (Kayıt Kısayolu)
-  if(e.key === 'F2' || e.key === 'F5'){
+  // F2 (Onay / Kayıt Kısayolu) — F5 tarayıcı yenileme olarak kalır
+  if(e.key === 'F2'){
     e.preventDefault();
     e.stopPropagation();
     if(e.repeat) return;
@@ -5280,8 +5280,8 @@ if('serviceWorker' in navigator){
 }
 // boot(); çağrısı cmms-sync.js tarafından yönetilir
 </script>
-<script src="api-client.js?v=11"></script>
-<script src="cmms-sync.js?v=11"></script>
-<script src="table-sort.js?v=11"></script>
+<script src="api-client.js?v=12"></script>
+<script src="cmms-sync.js?v=12"></script>
+<script src="table-sort.js?v=12"></script>
 </body>
 </html>
