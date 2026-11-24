@@ -277,6 +277,20 @@ CREATE TABLE fault_attachments (
   added_date DATE NOT NULL DEFAULT CURRENT_DATE
 );
 
+-- ================= ARIZA ONAY BİLDİRİMLERİ =================
+-- Yeni bildirilen her arıza için tek bir onay kaydı oluşturulur; karar arıza durumunu değiştirmez.
+CREATE TABLE fault_notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  fault_id UUID NOT NULL UNIQUE REFERENCES faults(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'Beklemede' CHECK (status IN ('Beklemede','Onaylandı','Reddedildi','Beklemeye Alındı')),
+  note TEXT,
+  decided_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  decided_at TIMESTAMPTZ,
+  read_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_fault_notifications_status ON fault_notifications(status, created_at DESC);
+
 -- ================= MUAYENE / DIŞ BAKIM (grup bazlı, çoklu varlık kapsar) =================
 CREATE TABLE inspection_records (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

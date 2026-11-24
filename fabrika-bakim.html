@@ -232,6 +232,7 @@ window.db = {
   materials: [],
   maintenanceRecords: [],
   faults: [],
+  faultNotifications: [],
   inspectionRecords: [],
   extMaintRecords: [],
   calibrationRecords: [],
@@ -249,6 +250,7 @@ var currentTab = 'panel';
 var weekOffset = 0;
 var maintFilter = 'upcoming';
 var faultFilter = 'open';
+var notifFilter = 'pending';
 var stockTab = 'materials';
 var tempChecklist = [], tempChecklistResults = [], tempUsedMaterials = [], tempOriginalUsed = [], tempSpareParts = [];
 var tempMaintAttachments = [], maintAttachmentsToDelete = [];
@@ -1154,12 +1156,13 @@ function tabsForRole(){
   const r = role();
   const all = [
     ['panel','📋','Panel'], ['assets','🏷️','Varlıklar'], ['groups','🗂️','Varlık Grupları'],
-    ['maint','🛠️','Bakımlar'], ['extmaint','🧰','Dış Bakım'], ['inspection','🔍','Muayene'], ['calibration','📐','Kalibrasyon'], ['faults','⚠️','Arızalar'], ['stock','📦','Stok'],
+    ['maint','🛠️','Bakımlar'], ['extmaint','🧰','Dış Bakım'], ['inspection','🔍','Muayene'], ['calibration','📐','Kalibrasyon'], ['faults','⚠️','Arızalar'], ['notifications','🔔','Bildirimler'], ['stock','📦','Stok'],
     ['projects','📁','Projeler'],
     ['costs','💰','Maliyet Raporu'],
     ['settings','⚙️','Ayarlar'],
   ];
   if(r==='Depo Sorumlusu') return all.filter(t=>['panel','stock','maint','extmaint','inspection','calibration','faults','assets'].includes(t[0]));
+  if(r!=='Yönetici') return all.filter(t=>t[0]!=='notifications');
   return all;
 }
 function renderApp(){
@@ -1234,6 +1237,7 @@ function renderTab(){
   if(currentTab==='inspection') return renderInspection(el);
   if(currentTab==='calibration') return renderCalibration(el);
   if(currentTab==='faults') return renderFaults(el);
+  if(currentTab==='notifications') return renderNotifications(el);
   if(currentTab==='stock') return renderStock(el);
   if(currentTab==='projects') return renderProjects(el);
   if(currentTab==='costs') return renderCosts(el);
@@ -2947,7 +2951,7 @@ window.renderFaultsTable = function(){
   body.innerHTML = list.length ? faultTableHtml(list, editable) : `<div class="empty">${faultFilter==='open'?'Açık arıza yok.':'Eşleşen kayıt yok.'}</div>`;
 };
 function faultTableHtml(list, editable){
-  return `<table><thead><tr><th>Takip No</th><th>Varlık</th><th>Proje</th><th>Başlık</th><th>Öncelik</th><th>Durum</th><th>Atanan</th><th>Maliyet</th><th>${faultFilter==='open'?'Bildirim':'Kapanış'}</th><th></th></tr></thead><tbody>
+  return `<table><thead><tr><th>Takip No</th><th>Varlık</th><th>Proje</th><th>Başlık</th><th>Öncelik</th><th>Durum</th><th>Onay</th><th>Atanan</th><th>Maliyet</th><th>${faultFilter==='open'?'Bildirim':'Kapanış'}</th><th></th></tr></thead><tbody>
   ${list.map(f=>{
     const a=asset(f.assetId);
     const prj = f.projectId ? projectById(f.projectId) : null;
@@ -2961,6 +2965,7 @@ function faultTableHtml(list, editable){
       <td>${esc(f.title)}${(f.attachments||[]).length?` <span class="tiny muted">📎${f.attachments.length}</span>`:''}</td>
       <td><span class="badge ${prCls}"><span class="dot"></span>${esc(f.priority)}</span></td>
       <td><span class="badge ${stCls}"><span class="dot"></span>${esc(f.status)}</span></td>
+      <td>${approvalBadgeHtml((latestApproval(f.id)||{}).status || f.approvalStatus, '', '')}</td>
       <td class="muted">${esc(userName(f.assignedTo))}</td>
       <td class="mono">${fmtMoney(faultCost(f))}</td>
       <td class="mono">${fmtStr(faultFilter==='open'?f.reportedDate:f.resolvedDate)}</td>
@@ -2973,10 +2978,83 @@ function faultTableHtml(list, editable){
   }).join('')}</tbody></table>`;
 }
 window.exportFaults = function(){
-  const headers=['Takip No','Varlık','Proje','Başlık','Öncelik','Durum','Atanan','Maliyet','Bildirim Tarihi','Kapanış Tarihi'];
-  const rows = db.faults.map(f=>{ const a=asset(f.assetId); const prj=f.projectId?projectById(f.projectId):null; return [f.trackingNo||'',a?a.name:'',f.projectName||(prj?prj.name:''),f.title,f.priority,f.status,userName(f.assignedTo),faultCost(f).toFixed(2),fmtStr(f.reportedDate),f.resolvedDate?fmtStr(f.resolvedDate):'']; });
+  const headers=['Takip No','Varlık','Proje','Başlık','Öncelik','Durum','Onay','Atanan','Maliyet','Bildirim Tarihi','Kapanış Tarihi'];
+  const rows = db.faults.map(f=>{ const a=asset(f.assetId); const prj=f.projectId?projectById(f.projectId):null; const appr=latestApproval(f.id); return [f.trackingNo||'',a?a.name:'',f.projectName||(prj?prj.name:''),f.title,f.priority,f.status,appr?appr.status:(f.approvalStatus||''),userName(f.assignedTo),faultCost(f).toFixed(2),fmtStr(f.reportedDate),f.resolvedDate?fmtStr(f.resolvedDate):'']; });
   exportCSV('arizalar.csv', headers, rows);
 };
+// ================= ARIZA ONAY BİLDİRİMLERİ (YÖNETİCİ) =================
+function approvalBadgeHtml(status, note, decidedByName){
+  const map = {
+    'Beklemede': ['b-warn','Onay bekliyor'],
+    'Onaylandı': ['b-ok','Onaylandı'],
+    'Reddedildi': ['b-danger','Reddedildi'],
+    'Beklemeye Alındı': ['b-muted','Beklemeye alındı'],
+  };
+  const cfg = map[status] || ['b-muted','Onay kaydı yok'];
+  const detail = [decidedByName, note].filter(Boolean).map(esc).join(' · ');
+  return `<span class="badge ${cfg[0]}"><span class="dot"></span>${cfg[1]}</span>${detail?`<div class="tiny muted" style="margin-top:3px; max-width:220px;">${detail}</div>`:''}`;
+}
+window.approvalBadgeHtml = approvalBadgeHtml;
+function latestApproval(faultId){
+  return (db.faultNotifications||[]).find(n=>n.faultId===faultId) || null;
+}
+window.renderNotifications = function(el){
+  const all = db.faultNotifications||[];
+  const pendingCount = all.filter(n=>n.status==='Beklemede').length;
+  el.innerHTML = `<div class="topbar"><div><h1>Bildirimler</h1><div class="sub">Yeni bildirilen arızaların yönetici onayı — karar arıza durumunu değiştirmez</div></div>
+    <div class="row"><span class="badge ${pendingCount?'b-warn':'b-ok'}"><span class="dot"></span>${pendingCount} onay bekliyor</span></div></div>
+    <div class="tabs">
+      <button class="${notifFilter==='pending'?'active':''}" onclick="notifFilter='pending'; renderTab();">Onay Bekleyenler</button>
+      <button class="${notifFilter==='all'?'active':''}" onclick="notifFilter='all'; renderTab();">Tüm Bildirimler</button>
+    </div>
+    <div class="panel" id="notifBody"></div>`;
+  renderNotificationsTable();
+};
+window.renderNotificationsTable = function(){
+  const body = document.getElementById('notifBody');
+  if(!body) return;
+  const list = (db.faultNotifications||[])
+    .filter(n=> notifFilter==='all' || n.status==='Beklemede')
+    .slice()
+    .sort((a,b)=> String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+  body.innerHTML = list.length ? `<table><thead><tr>
+      <th>Takip No</th><th>Arıza</th><th>Varlık</th><th>Bildiren</th><th>Bildirim</th><th>Onay Durumu</th><th>Karar / Not</th><th></th>
+    </tr></thead><tbody>
+    ${list.map(n=>{
+      const fault = (db.faults||[]).find(f=>f.id===n.faultId);
+      const assetName = n.assetName || (fault ? ((asset(fault.assetId)||{}).name||'') : '');
+      const title = n.title || (fault?fault.title:'—');
+      const trackingNo = n.trackingNo || (fault?fault.trackingNo:'');
+      const reportedBy = n.reportedByName || userName(fault?fault.reportedBy:null);
+      return `<tr>
+        <td class="mono" style="font-weight:700;">${esc(trackingNo||'—')}</td>
+        <td style="font-weight:700;">${esc(title||'—')}</td>
+        <td>${esc(assetName||'—')}</td>
+        <td class="muted">${esc(reportedBy||'—')}</td>
+        <td class="mono">${fmtStr(n.reportedDate || (fault?fault.reportedDate:null))}</td>
+        <td>${approvalBadgeHtml(n.status, '', '')}</td>
+        <td class="muted">${n.decidedByName?esc(n.decidedByName):'—'}${n.note?`<div class="tiny">${esc(n.note)}</div>`:''}</td>
+        <td style="white-space:nowrap;">
+          <button class="ghost small" onclick="openFaultDetail('${n.faultId}')">Arızayı aç</button>
+          <button class="${n.status==='Onaylandı'?'primary':'ghost'} small" onclick="decideFaultNotification('${n.id}','Onaylandı')">Onayla</button>
+          <button class="${n.status==='Beklemeye Alındı'?'accent':'ghost'} small" onclick="decideFaultNotification('${n.id}','Beklemeye Alındı')">Beklemeye Al</button>
+          <button class="${n.status==='Reddedildi'?'danger':'ghost'}" onclick="decideFaultNotification('${n.id}','Reddedildi')">Reddet</button>
+        </td>
+      </tr>`;
+    }).join('')}</tbody></table>` : `<div class="empty">${notifFilter==='pending'?'Onay bekleyen arıza bildirimi yok.':'Bildirim bulunamadı.'}</div>`;
+};
+window.decideFaultNotification = async function(id, decision){
+  // cmms-sync.js API katmanı bu işlevi geçersiz kılar; yedek yerel davranış:
+  const n = (db.faultNotifications||[]).find(x=>x.id===id);
+  if(n){
+    n.status = decision;
+    n.decidedAt = new Date().toISOString();
+    n.decidedByName = currentUser ? currentUser.name : '';
+    await saveDB();
+    renderTab();
+  }
+};
+
 window.openFaultForm = function(presetProjectId){
   const techs = db.users.filter(u=>u.role==='Teknisyen');
   tempCertificates = [];
@@ -3037,6 +3115,7 @@ window.openFaultDetail = async function(id){
   }
   const f = db.faults.find(x=>x.id===id);
   const a = asset(f.assetId);
+  const appr = latestApproval(f.id) || { status: f.approvalStatus, note: f.approvalNote, decidedByName: f.approvalDecidedByName };
   const techs = db.users.filter(u=>u.role==='Teknisyen');
   tempUsedMaterials = (f.usedMaterials||[]).map(u=>({...u}));
   tempOriginalUsed = (f.usedMaterials||[]).map(u=>({...u}));
@@ -3059,6 +3138,7 @@ window.openFaultDetail = async function(id){
       <div class="field"><label class="f-label" for="m-frepdate">Bildirim Tarihi</label><input id="m-frepdate" type="date" value="${f.reportedDate||''}"></div>
       <div class="field"><label class="f-label" for="m-fresolved">Kapanış Tarihi</label><input id="m-fresolved" type="date" value="${f.resolvedDate||''}"></div>
     </div>
+    <div class="field" style="margin-top:10px;"><label class="f-label">Yönetici Onayı</label><div style="padding-top:5px;">${approvalBadgeHtml(appr.status, appr.note, appr.decidedByName)}</div></div>
     <div class="field" style="margin-top:10px;"><label class="f-label">Proje (opsiyonel)</label>${comboHtml('m-fproject','Proje ara (varsa bağlayın)...')}</div>
     <div class="field" style="margin-top:10px;"><label class="f-label">Kullanılan Malzemeler</label>
       <div id="matUsedWrap"></div>
@@ -5280,8 +5360,8 @@ if('serviceWorker' in navigator){
 }
 // boot(); çağrısı cmms-sync.js tarafından yönetilir
 </script>
-<script src="api-client.js?v=12"></script>
-<script src="cmms-sync.js?v=12"></script>
-<script src="table-sort.js?v=12"></script>
+<script src="api-client.js?v=13"></script>
+<script src="cmms-sync.js?v=13"></script>
+<script src="table-sort.js?v=13"></script>
 </body>
 </html>

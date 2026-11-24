@@ -152,6 +152,34 @@ function toCamelFault(f) {
     totalCost: (parseFloat(f.external_service_cost) || 0) + (parseFloat(f.materials_cost) || 0),
     usedMaterials: f.used_materials || [],
     attachments: f.attachments || [],
+    approvalStatus: f.approval_status || null,
+    approvalNote: f.approval_note || '',
+    approvalDecidedAt: f.approval_decided_at || null,
+    approvalDecidedByName: f.approval_decided_by_name || null,
+  };
+}
+
+function toCamelFaultNotification(n) {
+  if (!n) return null;
+  return {
+    id: n.id,
+    faultId: n.fault_id,
+    status: n.status,
+    note: n.note || '',
+    decidedBy: n.decided_by || null,
+    decidedByName: n.decided_by_name || null,
+    decidedAt: n.decided_at || null,
+    readAt: n.read_at || null,
+    createdAt: n.created_at,
+    trackingNo: n.tracking_no || null,
+    title: n.title || null,
+    assetId: n.asset_id || null,
+    assetName: n.asset_name || null,
+    priority: n.priority || null,
+    faultStatus: n.fault_status || null,
+    reportedBy: n.reported_by || null,
+    reportedByName: n.reported_by_name || null,
+    reportedDate: n.reported_date || null,
   };
 }
 
@@ -287,6 +315,7 @@ module.exports = {
   toCamelPurchase,
   toCamelMaintenance,
   toCamelFault,
+  toCamelFaultNotification,
   toCamelInspection,
   toCamelExtMaint,
   toCamelCalibration,

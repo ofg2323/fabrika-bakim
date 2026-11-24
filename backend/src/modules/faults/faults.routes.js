@@ -6,6 +6,7 @@ const { getNextTrackingNo } = require('../../utils/counters');
 const { toCamelFault, isUuid } = require('../../utils/formatters');
 const { parsePagination, setPaginationHeaders } = require('../../utils/pagination');
 const { logAudit, getClientIp } = require('../../utils/audit');
+const syncService = require('../sync/sync.service');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -108,6 +109,16 @@ function normalizeFaultPriority(rawPriority) {
   return 'Orta';
 }
 
+// Yeni bildirilen arızalar için yönetici onay kaydı oluşturur (idempotent).
+async function createFaultNotification(client, faultId) {
+  await client.query(
+    `INSERT INTO fault_notifications (fault_id, status)
+     VALUES ($1, 'Beklemede')
+     ON CONFLICT (fault_id) DO NOTHING`,
+    [faultId]
+  );
+}
+
 router.param('id', (req, res, next, id) => {
   if (!isUuid(id)) {
     return res.status(404).json({ error: 'Arıza kaydı bulunamadı.' });
@@ -132,6 +143,10 @@ router.get('/', async (req, res) => {
       pr.tracking_no AS project_tracking_no,
       u_rep.name AS reported_by_name,
       u_ass.name AS assigned_to_name,
+      fn.status AS approval_status,
+      fn.note AS approval_note,
+      fn.decided_at AS approval_decided_at,
+      u_dec.name AS approval_decided_by_name,
       COALESCE(mat_cost.total, 0) AS materials_cost,
       COALESCE(mat_cost.items, '[]'::json) AS used_materials,
       COALESCE(att_list.items, '[]'::json) AS attachments
@@ -140,6 +155,8 @@ router.get('/', async (req, res) => {
     LEFT JOIN projects pr ON pr.id = f.project_id
     LEFT JOIN users u_rep ON u_rep.id = f.reported_by
     LEFT JOIN users u_ass ON u_ass.id = f.assigned_to
+    LEFT JOIN fault_notifications fn ON fn.fault_id = f.id
+    LEFT JOIN users u_dec ON u_dec.id = fn.decided_by
     LEFT JOIN (
       SELECT fault_id, SUM(qty * unit_cost) AS total,
         json_agg(json_build_object(
@@ -229,12 +246,18 @@ router.get('/:id', async (req, res) => {
       pr.tracking_no AS project_tracking_no,
       u_rep.name AS reported_by_name,
       u_ass.name AS assigned_to_name,
+      fn.status AS approval_status,
+      fn.note AS approval_note,
+      fn.decided_at AS approval_decided_at,
+      u_dec.name AS approval_decided_by_name,
       COALESCE(mat_cost.total, 0) AS materials_cost
     FROM faults f
     JOIN assets a ON a.id = f.asset_id
     LEFT JOIN projects pr ON pr.id = f.project_id
     LEFT JOIN users u_rep ON u_rep.id = f.reported_by
     LEFT JOIN users u_ass ON u_ass.id = f.assigned_to
+    LEFT JOIN fault_notifications fn ON fn.fault_id = f.id
+    LEFT JOIN users u_dec ON u_dec.id = fn.decided_by
     LEFT JOIN (
       SELECT fault_id, SUM(qty * unit_cost) AS total
       FROM fault_used_materials
@@ -350,6 +373,9 @@ router.post('/', async (req, res) => {
       ]
     );
 
+    // Yönetici onayı için bekleyen bildirim kaydı (arıza durumunu değiştirmez)
+    await createFaultNotification(client, faultRows[0].id);
+
     // Eğer arıza henüz açık ise ve varlık aktif ise durumunu 'Arızalı' yap
     if (faultStatus !== 'Tamamlandı' && assetRows[0].status === 'Aktif') {
       await client.query("UPDATE assets SET status = 'Arızalı' WHERE id = $1", [assetId]);
@@ -366,6 +392,7 @@ router.post('/', async (req, res) => {
     });
 
     await client.query('COMMIT');
+    syncService.notifyNotification({ action: 'created', faultId: faultRows[0].id, title: title.trim() });
     res.status(201).json(toCamelFault(faultRows[0]));
   } catch (err) {
     await client.query('ROLLBACK');
@@ -441,6 +468,7 @@ router.post('/bulk', requireRole('Yönetici', 'Teknisyen'), async (req, res) => 
 
       if (faultStatus !== 'Tamamlandı') {
         await client.query("UPDATE assets SET status = 'Arızalı' WHERE id = $1 AND status = 'Aktif'", [finalAssetId]);
+        await createFaultNotification(client, rows[0].id);
       }
 
       created.push(toCamelFault(rows[0]));
@@ -456,6 +484,7 @@ router.post('/bulk', requireRole('Yönetici', 'Teknisyen'), async (req, res) => 
     });
 
     await client.query('COMMIT');
+    syncService.notifyNotification({ action: 'bulk_created', count: created.length });
     res.status(201).json({ count: created.length, items: created });
   } catch (err) {
     await client.query('ROLLBACK');

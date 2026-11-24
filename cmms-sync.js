@@ -112,6 +112,17 @@
         } catch (err) {}
       });
 
+      liveSyncEventSource.addEventListener('notification', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          const role = API.getCurrentUser()?.role || window.currentUser?.role;
+          if (role !== 'Yönetici') return;
+          if (data.action === 'created') window.toast.info('Yeni arıza yönetici onayına gönderildi.');
+          else if (data.action === 'bulk_created') window.toast.info(`${data.count || 0} arıza onay listesine eklendi.`);
+          else if (data.action === 'decided') window.toast.info('Arıza onay kararı güncellendi.');
+        } catch (err) {}
+      });
+
       liveSyncEventSource.onerror = () => {
         if (liveSyncEventSource && liveSyncEventSource.readyState === EventSource.CLOSED) {
           stopLiveSync();
@@ -209,7 +220,8 @@
         extMaints,
         projects,
         settings,
-        calibrations
+        calibrations,
+        faultNotifications
       ] = await Promise.all([
         API.getUsers(),
         API.getAssetGroups(),
@@ -225,7 +237,10 @@
         API.getExtMaintenance(),
         API.getProjects(),
         API.getSettings(),
-        API.getCalibrations().catch(() => [])
+        API.getCalibrations().catch(() => []),
+        (API.getCurrentUser()?.role === 'Yönetici' || window.currentUser?.role === 'Yönetici')
+          ? API.getFaultNotifications({ all: 'true' }).catch(() => [])
+          : Promise.resolve([])
       ]);
 
       if (!window.db) {
@@ -233,7 +248,7 @@
           users: [], assetGroups: [], assets: [], materials: [],
           maintenanceRecords: [], faults: [], inspectionRecords: [],
           extMaintRecords: [], calibrationRecords: [], purchases: [], needsList: [],
-          stockMovements: [], suppliers: [], projects: [],
+          stockMovements: [], suppliers: [], projects: [], faultNotifications: [],
           counters: { fault: 0, maint: 0, inspection: 0, extmaint: 0, calibration: 0, project: 0 },
           printTemplate: {}
         };
@@ -260,6 +275,7 @@
       targetDb.purchases = purchases || [];
       targetDb.maintenanceRecords = maints || [];
       targetDb.faults = faults || [];
+      targetDb.faultNotifications = faultNotifications || [];
       targetDb.inspectionRecords = inspections || [];
       targetDb.extMaintRecords = extMaints || [];
       targetDb.calibrationRecords = calibrations || [];
@@ -324,6 +340,35 @@
         }));
       }
     } catch (e) { console.error('reloadUsers error:', e); }
+  };
+
+  window.reloadFaultNotifications = async function() {
+    try {
+      const role = API.getCurrentUser()?.role || window.currentUser?.role;
+      if (role !== 'Yönetici') return;
+      const notes = await API.getFaultNotifications({ all: 'true' });
+      if (window.db) window.db.faultNotifications = notes || [];
+    } catch (e) { console.error('reloadFaultNotifications error:', e); }
+  };
+
+  window.decideFaultNotification = async function(id, decision) {
+    try {
+      const updated = await API.decideFaultNotification(id, { decision });
+      await window.reloadFaultNotifications();
+      await window.reloadFaults();
+      if (window.db && updated) {
+        const fault = (window.db.faults || []).find(x => x.id === updated.faultId);
+        if (fault) {
+          fault.approvalStatus = updated.status;
+          fault.approvalNote = updated.note;
+          fault.approvalDecidedByName = updated.decidedByName;
+        }
+      }
+      if (typeof renderTab === 'function') renderTab();
+      window.toast.success('Onay kararı kaydedildi: ' + decision);
+    } catch (err) {
+      window.toast.error('Karar kaydedilemedi: ' + err.message);
+    }
   };
 
   window.reloadAssetGroups = async function() {
@@ -1452,7 +1497,8 @@
       await reloadAssets();
       closeModal();
       renderTab();
-      window.toast.success('Arıza bildirimi oluşturuldu.');
+      if (window.reloadFaultNotifications) await window.reloadFaultNotifications();
+      window.toast.success('Arıza bildirimi oluşturuldu ve yönetici onayına gönderildi.');
     } catch (err) {
       window.toast.error('Arıza kaydedilemedi: ' + err.message);
     }

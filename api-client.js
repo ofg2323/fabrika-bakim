@@ -291,6 +291,10 @@
     bulkCreateFaults(items) { return this.request('/faults/bulk', { method: 'POST', body: { items } }); },
     updateFault(id, data) { return this.request(`/faults/${id}`, { method: 'PUT', body: data }); },
     deleteFault(id) { return this.request(`/faults/${id}`, { method: 'DELETE' }); },
+
+    // Arıza onay bildirimleri (Yönetici)
+    getFaultNotifications(params) { return this.request(this.buildUrl('/fault-notifications', params)); },
+    decideFaultNotification(id, data) { return this.request(`/fault-notifications/${id}/decision`, { method: 'PATCH', body: data }); },
     uploadFaultAttachment(faultId, file, nameOrOpts, kind, url) {
       let name = nameOrOpts;
       if (nameOrOpts && typeof nameOrOpts === 'object') {

@@ -25,6 +25,21 @@ class SyncService {
     }
   }
 
+  // Arıza onay bildirimi gibi olaya özel sinyaller için named SSE event.
+  // Genel veri yenileme sinyalini (change) etkilemez; yalnızca anlık kullanıcı geri bildirimi sağlar.
+  notifyNotification(details = {}) {
+    const data = JSON.stringify({ type: 'notification', ...details });
+    const message = `event: notification\ndata: ${data}\n\n`;
+
+    for (const client of this.clients) {
+      try {
+        client.write(message);
+      } catch (err) {
+        this.clients.delete(client);
+      }
+    }
+  }
+
   addClient(req, res) {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',

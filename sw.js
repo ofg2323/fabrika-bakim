@@ -1,5 +1,5 @@
 // Fabrika Bakım Service Worker (PWA & Çevrimdışı Desteği)
-const CACHE_NAME = 'cmms-cache-v12';
+const CACHE_NAME = 'cmms-cache-v13';
 
 const PRECACHE_ASSETS = [
   '/',

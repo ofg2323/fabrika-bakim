@@ -31,7 +31,7 @@ No lint/typecheck/build script exists. Run backend commands from `backend/` so `
 ## Data and schema gotchas
 
 - Only three roles exist: `Yönetici`, `Teknisyen`, `Depo Sorumlusu` (DB `CHECK` and `ALLOWED_ROLES`). README mentions of `Bakımcı`/`Operatör` are stale.
-- `schema.sql` is fresh-install only: most tables use plain `CREATE TABLE`, so rerunning `npm run db:init` against an existing DB fails. Upgrades are one-off scripts: `node scripts/migrate-p0.js`, `migrate-p1.js`, `migrate-p2.js`, `migrate-p3.js` (not npm scripts).
+- `schema.sql` is fresh-install only: most tables use plain `CREATE TABLE`, so rerunning `npm run db:init` against an existing DB fails. Upgrades are one-off scripts: `node scripts/migrate-p0.js`, `migrate-p1.js`, `migrate-p2.js`, `migrate-p3.js`, `migrate-p4.js` (not npm scripts).
 - Never run `node scripts/setup-db.js` on data you care about: it drops/recreates `fabrika_bakim` and creates `fabrika_user` with a hardcoded password and `SUPERUSER`.
 - DB columns are snake_case; API payloads are camelCase. Add/use a `toCamelX` mapper in `backend/src/utils/formatters.js` and do not leak snake_case.
 - Tracking numbers (`A`, `B`, `C`, `D`, `K`, `P` + 5 digits) must come from `getNextTrackingNo(kind)` in `src/utils/counters.js`; never generate them client-side.
@@ -46,14 +46,14 @@ No lint/typecheck/build script exists. Run backend commands from `backend/` so `
 - Uploads go through `middleware/upload.js` (`upload.single(...)` includes MIME/extension checks, magic-byte validation, and a 100 MB limit). Store only the generated filename; `/uploads/*` requires auth except `logo-*` and `.ico` files.
 - Any successful POST/PUT/PATCH/DELETE automatically bumps the in-memory sync version and notifies SSE clients via middleware in `server.js`; new write routes need no extra wiring. The version resets on restart, with polling fallback on clients.
 - Adding a domain touches: schema table → router → mount in `server.js` → `api-client.js` method → `cmms-sync.js` `loadDB`/`reloadX` and `window.db` key → HTML rendering.
-- Global frontend state is `window.db` (`users`, `assetGroups`, `assets`, `materials`, `maintenanceRecords`, `faults`, `inspectionRecords`, `extMaintRecords`, `calibrationRecords`, `purchases`, `needsList`, `stockMovements`, `suppliers`, `projects`, `printTemplate`).
+- Global frontend state is `window.db` (`users`, `assetGroups`, `assets`, `materials`, `maintenanceRecords`, `faults`, `inspectionRecords`, `extMaintRecords`, `calibrationRecords`, `purchases`, `needsList`, `stockMovements`, `suppliers`, `projects`, `faultNotifications`, `printTemplate`).
 
 ## Tests
 
 - Tests use `node:test`, must run serially, and hit a real PostgreSQL from `DATABASE_URL`. If nothing is listening on `localhost:3001`, `tests/helpers.js` starts the server in-process; override with `API_BASE`.
 - `helpers.getAdminToken()` finds or creates a user named `Test Yöneticisi` and signs a JWT directly with `JWT_SECRET`; it may rewrite that user's password.
 - Tests run against the real database, not a disposable one. Some cleanup queries delete rows (for example `faults WHERE title LIKE '%test%'`) and reset counters. Never point tests at production; use unique names/timestamps and clean up in `after()`.
-- There are 12 test files (`01`–`12`); README claims of 10 files/81 tests are outdated.
+- There are 13 test files (`01`–`13`); README claims of 10 files/81 tests are outdated.
 - PWA tests expect `icon-192.png`, `icon-512.png`, and `favicon.ico` at the repo root. These are gitignored; run `node scripts/generate-icon.js` if missing.
 
 ## Frontend and PWA

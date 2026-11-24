@@ -210,6 +210,7 @@ app.use('/api/purchases', require('./modules/purchases/purchases.routes'));
 
 app.use('/api/maintenance', require('./modules/maintenance/maintenance.routes'));
 app.use('/api/faults', require('./modules/faults/faults.routes'));
+app.use('/api/fault-notifications', require('./modules/fault-notifications/fault-notifications.routes'));
 
 app.use('/api/inspections', require('./modules/inspections/inspections.routes'));
 app.use('/api/ext-maintenance', require('./modules/ext-maintenance/ext-maintenance.routes'));
