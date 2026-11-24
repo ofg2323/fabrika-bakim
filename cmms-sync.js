@@ -276,6 +276,7 @@
       targetDb.maintenanceRecords = maints || [];
       targetDb.faults = faults || [];
       targetDb.faultNotifications = faultNotifications || [];
+      if (typeof window.updateNavBadge === 'function') window.updateNavBadge();
       targetDb.inspectionRecords = inspections || [];
       targetDb.extMaintRecords = extMaints || [];
       targetDb.calibrationRecords = calibrations || [];
@@ -348,6 +349,7 @@
       if (role !== 'Yönetici') return;
       const notes = await API.getFaultNotifications({ all: 'true' });
       if (window.db) window.db.faultNotifications = notes || [];
+      if (typeof window.updateNavBadge === 'function') window.updateNavBadge();
     } catch (e) { console.error('reloadFaultNotifications error:', e); }
   };
 

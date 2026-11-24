@@ -56,6 +56,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .navlinks button:hover{background:#28313d;}
 .navlinks button.active{background:var(--sidebar-active); color:#fff;}
 .navlinks .ic{width:16px; text-align:center; opacity:.85;}
+.nav-badge{margin-left:auto; min-width:18px; height:18px; padding:0 5px; border-radius:9px; background:var(--danger,#dc2626); color:#fff; font-size:10.5px; font-weight:800; display:inline-flex; align-items:center; justify-content:center; line-height:1;}
+.nav-badge[hidden]{display:none;}
 .userbox{padding:12px 14px; border-top:1px solid #333e4a;}
 .userbox .name{color:#fff; font-weight:700; font-size:12.5px;}
 .userbox .role{font-size:11px; color:#8993a2;}
@@ -1172,7 +1174,7 @@ function renderApp(){
   root.innerHTML = `<div id="app">
     <div class="sidebar">
       <div class="brand"><div class="b1">Fabrika Bakım</div><div class="b2">Varlık &amp; Bakım Takip</div><div class="stripe"></div></div>
-      <div class="navlinks">${tabs.map(([k,ic,label])=>`<button class="${currentTab===k?'active':''}" onclick="goTab('${k}')"><span class="ic">${ic}</span>${label}</button>`).join('')}</div>
+      <div class="navlinks">${tabs.map(([k,ic,label])=>`<button class="${currentTab===k?'active':''}" data-tab="${k}" onclick="goTab('${k}')"><span class="ic">${ic}</span>${label}${k==='notifications'?`<span class="nav-badge" id="navNotifBadge" hidden></span>`:''}</button>`).join('')}</div>
       <div class="userbox">
         <div class="name">${esc(currentUser.name)}</div>
         <div class="role">${esc(currentUser.role)}</div>
@@ -1197,8 +1199,16 @@ function renderApp(){
       <div id="mainContent"></div>
     </div>
   </div>`;
+  updateNavBadge();
   renderTab();
 }
+window.updateNavBadge = function(){
+  const el = document.getElementById('navNotifBadge');
+  if(!el) return;
+  const count = (db.faultNotifications||[]).filter(n=>n.status==='Beklemede').length;
+  el.textContent = count>99 ? '99+' : String(count);
+  el.hidden = count === 0;
+};
 function isAppInstalled(){
   return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
 }
@@ -3011,6 +3021,7 @@ window.renderNotifications = function(el){
   renderNotificationsTable();
 };
 window.renderNotificationsTable = function(){
+  if(typeof updateNavBadge === 'function') updateNavBadge();
   const body = document.getElementById('notifBody');
   if(!body) return;
   const list = (db.faultNotifications||[])
@@ -5360,8 +5371,8 @@ if('serviceWorker' in navigator){
 }
 // boot(); çağrısı cmms-sync.js tarafından yönetilir
 </script>
-<script src="api-client.js?v=13"></script>
-<script src="cmms-sync.js?v=13"></script>
-<script src="table-sort.js?v=13"></script>
+<script src="api-client.js?v=14"></script>
+<script src="cmms-sync.js?v=14"></script>
+<script src="table-sort.js?v=14"></script>
 </body>
 </html>
