@@ -55,6 +55,92 @@
     info(msg) { this.show(msg, 'info'); }
   };
 
+  // ================= BİLDİRİM SESİ (Web Audio — harici dosya gerekmez) =================
+  let notifAudioCtx = null;
+  function ensureNotificationAudio() {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    try {
+      if (!notifAudioCtx) notifAudioCtx = new Ctx();
+      if (notifAudioCtx.state === 'suspended') notifAudioCtx.resume().catch(() => {});
+      return notifAudioCtx;
+    } catch (e) {
+      return null;
+    }
+  }
+  // Tarayıcılar sesi kullanıcı etkileşimine kadar engeller; ilk tıklama/tuşta bağlamı aç.
+  function unlockNotificationAudio() {
+    const ctx = ensureNotificationAudio();
+    if (ctx && ctx.state === 'running') {
+      document.removeEventListener('pointerdown', unlockNotificationAudio);
+      document.removeEventListener('keydown', unlockNotificationAudio);
+    }
+  }
+  document.addEventListener('pointerdown', unlockNotificationAudio, { passive: true });
+  document.addEventListener('keydown', unlockNotificationAudio);
+
+  window.playNotificationTone = function() {
+    const ctx = ensureNotificationAudio();
+    if (!ctx) return;
+    try {
+      const now = ctx.currentTime;
+      [[880, 0], [1174.66, 0.16]].forEach(([freq, offset]) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.0001, now + offset);
+        gain.gain.exponentialRampToValueAtTime(0.16, now + offset + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.14);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + offset);
+        osc.stop(now + offset + 0.16);
+      });
+    } catch (e) {}
+  };
+
+  // ================= AÇILIR BİLDİRİM PENCERESİ =================
+  window.showNotificationPopup = function(data) {
+    let host = document.getElementById('notificationPopupHost');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'notificationPopupHost';
+      document.body.appendChild(host);
+    }
+    const close = "this.closest('.notif-popup')?.remove()";
+    const bulk = data.action === 'bulk_created';
+    const heading = bulk ? `${data.count || 0} yeni arıza bildirildi` : (data.title || 'Yeni arıza bildirimi');
+    const lines = bulk
+      ? `<div class="np-line">${data.count || 0} arıza yönetici onay listesine eklendi.</div>`
+        + (Array.isArray(data.titles) && data.titles.length
+          ? `<div class="np-detail">${data.titles.slice(0, 3).map(t => esc(t)).join('<br>')}</div>` : '')
+      : `<div class="np-line"><b>Takip No:</b> ${esc(data.trackingNo || '—')}</div>
+         <div class="np-line"><b>Varlık:</b> ${esc(data.assetName || '—')}</div>
+         <div class="np-line"><b>Öncelik:</b> ${esc(data.priority || 'Orta')} · <b>Durum:</b> ${esc(data.status || 'Açık')}</div>
+         <div class="np-line"><b>Bildiren:</b> ${esc(data.reportedByName || '—')}</div>`;
+
+    const card = document.createElement('div');
+    card.className = 'notif-popup';
+    card.setAttribute('role', 'alert');
+    card.innerHTML = `
+      <div class="np-head"><span class="np-icon">🔔</span><div>
+        <div class="np-title">Yeni Onay Bildirimi</div>
+        <div class="np-sub">${esc(heading)}</div>
+      </div><button class="np-close" onclick="${close}" aria-label="Kapat">✕</button></div>
+      <div class="np-body">${lines}</div>
+      <div class="np-actions">
+        <button class="ghost small" onclick="${close}">Kapat</button>
+        <button class="primary small" onclick="${close}; if(window.goTab) goTab('notifications')">Bildirimleri Aç</button>
+      </div>`;
+    host.appendChild(card);
+    requestAnimationFrame(() => card.classList.add('show'));
+    setTimeout(() => {
+      card.classList.remove('show');
+      setTimeout(() => card.remove(), 300);
+    }, 12000);
+  };
+
   // Oturum süresi dolduğunda
   window.onAuthExpired = function() {
     stopLiveSync();
@@ -117,9 +203,15 @@
           const data = JSON.parse(e.data);
           const role = API.getCurrentUser()?.role || window.currentUser?.role;
           if (role !== 'Yönetici') return;
-          if (data.action === 'created') window.toast.info('Yeni arıza yönetici onayına gönderildi.');
-          else if (data.action === 'bulk_created') window.toast.info(`${data.count || 0} arıza onay listesine eklendi.`);
-          else if (data.action === 'decided') window.toast.info('Arıza onay kararı güncellendi.');
+          if (data.action === 'created' || data.action === 'bulk_created') {
+            window.toast.info(data.action === 'created'
+              ? 'Yeni arıza yönetici onayına gönderildi.'
+              : `${data.count || 0} arıza onay listesine eklendi.`);
+            window.playNotificationTone();
+            window.showNotificationPopup(data);
+          } else if (data.action === 'decided') {
+            window.toast.info('Arıza onay kararı güncellendi.');
+          }
         } catch (err) {}
       });
 

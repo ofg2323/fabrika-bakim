@@ -111,12 +111,14 @@ function normalizeFaultPriority(rawPriority) {
 
 // Yeni bildirilen arızalar için yönetici onay kaydı oluşturur (idempotent).
 async function createFaultNotification(client, faultId) {
-  await client.query(
+  const { rows } = await client.query(
     `INSERT INTO fault_notifications (fault_id, status)
      VALUES ($1, 'Beklemede')
-     ON CONFLICT (fault_id) DO NOTHING`,
+     ON CONFLICT (fault_id) DO NOTHING
+     RETURNING id`,
     [faultId]
   );
+  return rows[0]?.id || null;
 }
 
 router.param('id', (req, res, next, id) => {
@@ -334,7 +336,7 @@ router.post('/', async (req, res) => {
     await client.query('BEGIN');
 
     // Varlığı doğrula ve kilitle
-    const { rows: assetRows } = await client.query('SELECT id, status FROM assets WHERE id = $1 FOR UPDATE', [assetId]);
+    const { rows: assetRows } = await client.query('SELECT id, name, status FROM assets WHERE id = $1 FOR UPDATE', [assetId]);
     if (!assetRows[0]) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Varlık bulunamadı.' });
@@ -374,7 +376,7 @@ router.post('/', async (req, res) => {
     );
 
     // Yönetici onayı için bekleyen bildirim kaydı (arıza durumunu değiştirmez)
-    await createFaultNotification(client, faultRows[0].id);
+    const notificationId = await createFaultNotification(client, faultRows[0].id);
 
     // Eğer arıza henüz açık ise ve varlık aktif ise durumunu 'Arızalı' yap
     if (faultStatus !== 'Tamamlandı' && assetRows[0].status === 'Aktif') {
@@ -392,7 +394,18 @@ router.post('/', async (req, res) => {
     });
 
     await client.query('COMMIT');
-    syncService.notifyNotification({ action: 'created', faultId: faultRows[0].id, title: title.trim() });
+    syncService.notifyNotification({
+      action: 'created',
+      faultId: faultRows[0].id,
+      notificationId,
+      trackingNo: faultRows[0].tracking_no,
+      title: title.trim(),
+      assetName: assetRows[0].name || null,
+      priority: faultPriority,
+      status: faultStatus,
+      reportedByName: req.user.name,
+      reportedDate: rDate,
+    });
     res.status(201).json(toCamelFault(faultRows[0]));
   } catch (err) {
     await client.query('ROLLBACK');
@@ -484,7 +497,11 @@ router.post('/bulk', requireRole('Yönetici', 'Teknisyen'), async (req, res) => 
     });
 
     await client.query('COMMIT');
-    syncService.notifyNotification({ action: 'bulk_created', count: created.length });
+    syncService.notifyNotification({
+      action: 'bulk_created',
+      count: created.length,
+      titles: created.slice(0, 3).map(f => f.title),
+    });
     res.status(201).json({ count: created.length, items: created });
   } catch (err) {
     await client.query('ROLLBACK');
