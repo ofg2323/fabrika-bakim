@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: fabrika_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: fabrika_bakim
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fabrika_user -d fabrika_bakim"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://fabrika_user:test_password@localhost:5432/fabrika_bakim
+      JWT_SECRET: ci-only-test-secret-key-please-change
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Bağımlılıkları kur
+        working-directory: backend
+        run: npm ci
+
+      - name: PWA ikonlarını üret
+        working-directory: backend
+        run: node scripts/generate-icon.js
+
+      - name: Yükleme klasörünü hazırla
+        working-directory: backend
+        run: mkdir -p uploads
+
+      - name: Testleri çalıştır (izole *_test veritabanı)
+        working-directory: backend
+        run: npm test

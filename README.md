@@ -290,10 +290,10 @@ node scripts/setup-db.js
 ```
 Ardından şemayı veritabanına uygulayın:
 ```bash
-npm run db:init
+npm run db:migrate
 ```
 > [!NOTE]
-> `npm run db:init` komutu `src/db/schema.sql` dosyasını çalıştırarak tüm tabloları, sayaçları ve indeksleri eksiksiz oluşturur.
+> `npm run db:migrate`, boş veritabanında `src/db/schema.sql` temel şemasını (`0001_initial`) uygular; mevcut veritabanında ise yalnızca bekleyen migration'ları çalıştırır. Durum: `npm run db:status`. Yeni şema değişiklikleri `src/db/migrations/` altına numaralı dosya olarak eklenir. Ayrıntılar: `DEPLOY.md`.
 
 ### 5. Sunucuyu Başlatma
 - **Geliştirme Modunda (Otomatik Yeniden Başlatma)**:
@@ -480,7 +480,7 @@ cd backend
 npm test
 ```
 > [!NOTE]
-> `npm test` komutu, testler öncesinde arka planda HTTP sunucusunu otomatik olarak denetler (`ensureServerRunning`), sunucu kapalıysa test sürecinde ayağa kaldırır ve test bitiminde temizler.
+> `npm test`, izole bir `<veritabanı>_test` veritabanı oluşturur (yoksa), migration'ları uygular ve testleri 3101 portunda çalıştırır. Geliştirme/üretim veritabanına yazmaz. Ayrıntılar: `DEPLOY.md`.
 
 ### Test Kapsamı (10 Test Dosyası / 14 Paket / 81 Test Senaryosu):
 1. `01_auth_users.test.js`: Giriş, JWT imzalama, yetkisiz erişim kontrolü, kullanıcı CRUD işlemleri.

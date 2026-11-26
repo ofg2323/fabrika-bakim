@@ -9,3 +9,6 @@ tools/
 backend/uploads/*
 !backend/uploads/.gitkeep
 *.log
+backups/
+yedek/
+backend/uploads-test/

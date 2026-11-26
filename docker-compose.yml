@@ -1,0 +1,51 @@
+# Fabrika Bakım Yönetimi — tek komutla üretim kurulumu
+#
+#   cp .env.docker.example .env
+#   # .env içindeki POSTGRES_PASSWORD ve JWT_SECRET değerlerini değiştirin
+#   docker compose up -d --build
+#
+# Uygulama: http://localhost:3001
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fabrika_bakim}
+      POSTGRES_USER: ${POSTGRES_USER:-fabrika_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD tanımlanmalı (.env)}
+      TZ: Europe/Istanbul
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-fabrika_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-fabrika_bakim}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET tanımlanmalı (.env)}
+      NODE_ENV: production
+      PORT: 3001
+      UPLOAD_DIR: /app/backend/uploads
+      # Tarayıcıdan erişilen adres. Alan adı/IP ile kullanıyorsanız .env içinde güncelleyin.
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3001}
+      TRUST_PROXY: "1"
+      TZ: Europe/Istanbul
+    ports:
+      - "${APP_PORT:-3001}:3001"
+    volumes:
+      - uploads:/app/backend/uploads
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  uploads:

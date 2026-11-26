@@ -8,8 +8,13 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "db:init": "node src/db/init.js",
+    "db:migrate": "node src/db/migrate.js",
+    "db:status": "node src/db/migrate.js --status",
+    "db:backup": "node scripts/db-backup.js",
+    "db:restore": "node scripts/db-restore.js",
     "tunnel": "tools\\cloudflared.exe tunnel --protocol http2 --url http://localhost:3001",
-    "test": "node --test --test-concurrency=1 tests/*.test.js"
+    "test": "node scripts/run-tests.js",
+    "test:setup": "node scripts/test-db.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

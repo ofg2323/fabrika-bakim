@@ -5,6 +5,25 @@ if (pool && pool.options) {
 
 const API_BASE = process.env.API_BASE || 'http://localhost:3001';
 
+// Güvenlik: testler veri siler. Yanlışlıkla geliştirme/üretim veritabanına
+// bağlanmayı engelle. `npm test` otomatik olarak *_test veritabanı kullanır.
+function currentDatabaseName() {
+  try {
+    return new URL(process.env.DATABASE_URL || '').pathname.replace(/^\//, '');
+  } catch (_) {
+    return '';
+  }
+}
+
+const databaseName = currentDatabaseName();
+if (!/_test$/.test(databaseName) && process.env.ALLOW_DESTRUCTIVE_TESTS !== '1') {
+  throw new Error(
+    `Testler yıkıcıdır ve "${databaseName || 'DATABASE_URL tanımsız'}" veritabanına bağlanıyor.\n` +
+      'Testleri `npm test` ile çalıştırın (otomatik *_test veritabanı oluşturur).\n' +
+      'Bilinçli olarak devam etmek için ALLOW_DESTRUCTIVE_TESTS=1 tanımlayın.'
+  );
+}
+
 let cachedToken = null;
 let cachedAdmin = null;
 let serverInstance = null;

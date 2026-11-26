@@ -1,0 +1,14 @@
+**/node_modules
+**/.env
+**/.env.*
+!**/.env.example
+backend/uploads/*
+backend/tools/*
+backend/tests
+backups
+yedek
+.github
+.git
+*.log
+*.dump
+*.tar.gz

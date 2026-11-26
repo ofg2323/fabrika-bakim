@@ -1,18 +1,25 @@
 // Kullanım: npm run db:init
-// DATABASE_URL'de tanımlı veritabanına schema.sql dosyasını uygular.
-const fs = require('fs');
-const path = require('path');
+//
+// Geriye dönük uyumluluk için korunmuştur. Boş veritabanında schema.sql'i uygular,
+// mevcut veritabanında temel şemayı kaydeder ve bekleyen migration'ları çalıştırır.
+// Günlük kullanımda `npm run db:migrate` yeterlidir.
+const { runMigrations } = require('./migrate');
 const pool = require('./pool');
 
 async function main() {
-  const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
-  console.log('Şema uygulanıyor...');
-  await pool.query(schema);
-  console.log('Tamamlandı. Veritabanı tabloları oluşturuldu.');
-  await pool.end();
+  await runMigrations();
+  console.log('Veritabanı hazır.');
 }
 
-main().catch((err) => {
-  console.error('Şema uygulanamadı:', err.message);
-  process.exit(1);
-});
+main()
+  .catch((err) => {
+    console.error('Veritabanı kurulumu başarısız:', err.message);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    try {
+      await pool.end();
+    } catch (_) {
+      /* yoksay */
+    }
+  });

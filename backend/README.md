@@ -30,7 +30,7 @@ tam sürümüdür. Projedeki tüm modüller eksiksiz olarak geliştirilmiştir:
    npm install
    cp .env.example .env
    # .env içindeki DATABASE_URL ve JWT_SECRET değerlerini kendi bilgilerinizle doldurun
-   npm run db:init   # schema.sql'i veritabanına uygular
+   npm run db:migrate   # şemayı uygular / bekleyen migration'ları çalıştırır
    npm start         # sunucuyu başlatır (varsayılan: http://localhost:3001)
    ```
 4. İlk yönetici hesabını oluşturmak için:
